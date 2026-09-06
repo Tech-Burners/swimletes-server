@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.log
+.env
+env
+BETOPIA.md
+MODULE_EXPLORATION.md
+PARTNER_DASHBOARD_API.md
