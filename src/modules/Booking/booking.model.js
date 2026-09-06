@@ -1,7 +1,13 @@
 const mongoose = require('mongoose');
 
-const swimmerInfoSchema = new mongoose.Schema(
+// Swimmer sub-schema (Steps 1 & 2: "Who's swimming?")
+const swimmerSchema = new mongoose.Schema(
   {
+    bookedFor: {
+      type: String,
+      enum: ['myself', 'someone_else'],
+      default: 'someone_else'
+    },
     name: {
       type: String,
       required: true,
@@ -9,41 +15,127 @@ const swimmerInfoSchema = new mongoose.Schema(
     },
     age: {
       type: Number,
-      required: true
+      required: true,
+      min: 0
     },
-    skillLevel: {
-      type: String, // e.g. "Nervous beginner", "Intermediate", "Advanced"
-      default: 'Beginner'
-    },
-    medicalNotes: {
+    comfortLevel: {
       type: String,
-      default: ''
+      enum: [
+        'never_been_in_water',  // "Never been in water"
+        'nervous_beginner',     // "Nervous beginner"
+        'can_float_paddle',     // "Can float & paddle"
+        'swims_confidently'     // "Swims Confidently"
+      ],
+      default: 'nervous_beginner'
+    },
+    notes: {
+      type: String,
+      default: '',
+      trim: true // "Optional – fears, ear tubes, past bad experience, medical notes"
     }
   },
   { _id: false }
 );
 
+// Waiver sub-schema (Step 4: "Waiver Form")
+const waiverAgreementSchema = new mongoose.Schema(
+  {
+    isSigned: {
+      type: Boolean,
+      default: false
+    },
+    signerRelationship: {
+      type: String,
+      enum: ['parent', 'legal_guardian', 'self'],
+      default: 'parent'
+    },
+    legalName: {
+      type: String,
+      trim: true,
+      default: '' // "Type your full legal name"
+    },
+    signedDate: {
+      type: Date,
+      default: Date.now
+    },
+    isAgreed: {
+      type: Boolean,
+      default: false // "I've read form and I accept it on swimmer's behalf"
+    },
+    waiverVersion: {
+      type: String,
+      default: 'v1.0'
+    }
+  },
+  { _id: false }
+);
+
+// Location sub-schema
+const bookingLocationSchema = new mongoose.Schema(
+  {
+    locationType: {
+      type: String,
+      enum: [
+        'public_pool',      // "Meet at a public pool"
+        'instructor_pool',  // "Use instructor's pool"
+        'client_pool'       // "Travel to family's private pool"
+      ],
+      required: true
+    },
+    pool: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Pool',
+      required: false
+    },
+    poolName: {
+      type: String,
+      default: '' // e.g. "Oak Lawn Community Pool"
+    },
+    address: {
+      type: String,
+      required: true // e.g. "3418 Cedar Springs Rd"
+    },
+    location: {
+      type: {
+        type: String,
+        enum: ['Point'],
+        default: 'Point'
+      },
+      coordinates: {
+        type: [Number],
+        default: [0, 0] // [longitude, latitude]
+      }
+    },
+    travelDistance: {
+      type: Number, // In miles (if client_pool)
+      default: 0
+    }
+  },
+  { _id: false }
+);
+
+// Pricing Breakdown sub-schema (Step 5: "Review & Pay")
 const priceBreakdownSchema = new mongoose.Schema(
   {
     lessonPrice: {
       type: Number,
       required: true,
-      min: 0
+      min: 0 // Base rate (e.g. $60.00)
     },
     bookingFee: {
       type: Number,
       default: 0,
-      min: 0 // e.g. 5% platform fee paid by parent
+      min: 0 // 5% client platform fee (e.g. $3.00)
     },
     poolEntryFee: {
       type: Number,
       default: 0,
-      min: 0 // Entry fee if public pool charges instructor/swimmer
+      min: 0 // Entry fee charged by public pool (e.g. $8.00)
     },
     travelFee: {
       type: Number,
       default: 0,
-      min: 0 // Distance fee if beyond free radius
+      min: 0 // Distance surcharge if outside free radius
     },
     discountAmount: {
       type: Number,
@@ -53,22 +145,47 @@ const priceBreakdownSchema = new mongoose.Schema(
     totalAmount: {
       type: Number,
       required: true,
-      min: 0
+      min: 0 // Total charged at checkout (e.g. $63.00 or $71.00)
     },
     instructorEarnings: {
       type: Number,
       required: true,
-      min: 0
+      min: 0 // Payout amount to instructor
     },
     platformCommission: {
       type: Number,
       default: 0,
-      min: 0 // Commission fee deducted from instructor
+      min: 0 // Commission retained by Swimletes
     }
   },
   { _id: false }
 );
 
+// Payment sub-schema
+const paymentInfoSchema = new mongoose.Schema(
+  {
+    method: {
+      type: String,
+      enum: ['card', 'paypal', 'apple_pay', 'google_pay'],
+      default: 'card'
+    },
+    status: {
+      type: String,
+      enum: ['unpaid', 'pending', 'paid', 'refunded', 'partially_refunded', 'failed'],
+      default: 'unpaid'
+    },
+    transactionId: {
+      type: String,
+      default: ''
+    },
+    paidAt: {
+      type: Date
+    }
+  },
+  { _id: false }
+);
+
+// Master Booking Schema
 const bookingSchema = new mongoose.Schema(
   {
     bookingId: {
@@ -77,13 +194,13 @@ const bookingSchema = new mongoose.Schema(
       index: true
     },
 
+    // 1. Involved Parties
     client: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
       index: true
     },
-
     instructor: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -91,16 +208,16 @@ const bookingSchema = new mongoose.Schema(
       index: true
     },
 
-    // Swimmer(s) attending the lesson
+    // 2. Swimmer Info (Steps 1 & 2)
     swimmer: {
-      type: swimmerInfoSchema,
+      type: swimmerSchema,
       required: true
     },
 
-    // Lesson configurations
+    // 3. Lesson Details & Duration
     lessonType: {
       type: String,
-      default: 'Private lesson'
+      default: '60-min private lesson'
     },
     duration: {
       type: Number, // In minutes: 30, 45, 60, 90
@@ -108,7 +225,7 @@ const bookingSchema = new mongoose.Schema(
       default: 60
     },
 
-    // Schedule & Date
+    // 4. Date & Time (Step 3)
     date: {
       type: Date,
       required: true,
@@ -123,83 +240,39 @@ const bookingSchema = new mongoose.Schema(
       required: true
     },
 
-    // Location details
-    locationType: {
-      type: String,
-      enum: ['instructor_pool', 'client_pool', 'public_pool'],
-      required: true
-    },
-    pool: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Pool',
-      required: false
-    },
-    poolName: {
-      type: String,
-      default: ''
-    },
-    address: {
-      type: String,
-      required: true
-    },
+    // 5. Location Details
     location: {
-      type: {
-        type: String,
-        enum: ['Point'],
-        default: 'Point'
-      },
-      coordinates: {
-        type: [Number],
-        default: [0, 0] // [longitude, latitude]
-      }
-    },
-    travelDistance: {
-      type: Number, // In miles, if client_pool
-      default: 0
+      type: bookingLocationSchema,
+      required: true
     },
 
-    // Pricing & Fees
+    // 6. Liability Waiver (Step 4)
+    waiver: {
+      type: waiverAgreementSchema,
+      required: true
+    },
+
+    // 7. Pricing & Payment Breakdown (Step 5)
     pricing: {
       type: priceBreakdownSchema,
       required: true
     },
-
-    // Payment Information
-    paymentMethod: {
-      type: String,
-      enum: ['card', 'paypal', 'apple_pay', 'google_pay'],
-      default: 'card'
-    },
-    paymentStatus: {
-      type: String,
-      enum: ['unpaid', 'pending', 'paid', 'refunded', 'partially_refunded', 'failed'],
-      default: 'unpaid'
-    },
-    transactionId: {
-      type: String,
-      default: ''
+    payment: {
+      type: paymentInfoSchema,
+      default: () => ({})
     },
 
-    // Liability Waiver
-    waiverSigned: {
-      type: Boolean,
-      default: false
-    },
-    waiverSignedAt: {
-      type: Date
-    },
-
-    // Booking Lifecycle Status
+    // 8. Booking Lifecycle Status
     status: {
       type: String,
       enum: [
         'pending',   // Waiting for instructor approval
         'accepted',  // Confirmed by instructor
         'declined',  // Declined by instructor
-        'active',    // Lesson happening now
-        'completed', // Finished
-        'cancelled', // Cancelled
-        'disputed'   // Dispute raised
+        'active',    // Happening now / in-progress
+        'completed', // Completed successfully
+        'cancelled', // Cancelled by client or instructor
+        'disputed'   // Under dispute investigation
       ],
       default: 'pending',
       index: true
@@ -214,7 +287,7 @@ const bookingSchema = new mongoose.Schema(
       type: Date
     },
 
-    // Cancellation Information
+    // Cancellation Details & Policies
     cancelledBy: {
       type: String,
       enum: ['client', 'instructor', 'admin']
@@ -225,7 +298,11 @@ const bookingSchema = new mongoose.Schema(
     },
     cancellationWindow: {
       type: String,
-      enum: ['free', 'late', 'non_refundable'] // Free (>24h), Late (50% charge), Non-refundable (<2h)
+      enum: [
+        'free',            // >24 hours prior (100% refund)
+        'late',            // <24 hours prior (50% charge / partial refund)
+        'non_refundable'   // <2 hours prior / no show
+      ]
     },
     refundAmount: {
       type: Number,
@@ -235,7 +312,7 @@ const bookingSchema = new mongoose.Schema(
       type: Date
     },
 
-    // Completion & Review Information
+    // Completion & Reviews
     completedAt: {
       type: Date
     },
@@ -253,7 +330,7 @@ const bookingSchema = new mongoose.Schema(
   }
 );
 
-// Generate unique human-readable booking ID before save (e.g. SW-10293)
+// Auto-generate human-readable Booking Reference ID (e.g. SW-782941)
 bookingSchema.pre('save', async function (next) {
   if (!this.bookingId) {
     const randomCode = Math.floor(100000 + Math.random() * 900000);
@@ -262,6 +339,6 @@ bookingSchema.pre('save', async function (next) {
   next();
 });
 
-bookingSchema.index({ 'location': '2dsphere' });
+bookingSchema.index({ 'location.location': '2dsphere' });
 
 module.exports = mongoose.model('Booking', bookingSchema);

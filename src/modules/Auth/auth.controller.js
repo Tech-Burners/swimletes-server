@@ -128,7 +128,7 @@ const localAuth = catchAsync(async (req, res) => {
 //Sign up
 const signUp = catchAsync(async (req, res) => {
 
-  const { email, number, countryCode, role, fullName } = req.body;
+  const { email, role, fullName } = req.body;
 
   if (!role) {
     throw new ApiError(status.BAD_REQUEST, "Role is required!");
@@ -142,57 +142,26 @@ const signUp = catchAsync(async (req, res) => {
       req.body.image = req.files.image[0].filename;
     }
 
-    if (req.files.certificate?.[0]) {
-      req.body.certificate = req.files.certificate[0].filename;
-    }
+    // if (req.files.certificate?.[0]) {
+    //   req.body.certificate = req.files.certificate[0].filename;
+    // }
 
-    if (req.files.identityProof?.[0]) {
-      req.body.identityProof = req.files.identityProof[0].filename;
-    }
+    // if (req.files.identityProof?.[0]) {
+    //   req.body.identityProof = req.files.identityProof[0].filename;
+    // }
 
-    if (req.files.businessCertification?.[0]) {
-      req.body.businessCertification = req.files.businessCertification[0].filename;
-    }
+    // if (req.files.businessCertification?.[0]) {
+    //   req.body.businessCertification = req.files.businessCertification[0].filename;
+    // }
 
-    if (req.files.bankStatement?.[0]) {
-      req.body.bankStatement = req.files.bankStatement[0].filename;
-    }
+    // if (req.files.bankStatement?.[0]) {
+    //   req.body.bankStatement = req.files.bankStatement[0].filename;
+    // }
   }
-
-  /* ---------- ROLE LOGIC ---------- */
 
   let sentTo;
   let receiverType;
   let existingOTP;
-
-  // if (role === "user") {
-
-  //   if (!number || !countryCode) {
-  //     throw new ApiError(
-  //       status.BAD_REQUEST,
-  //       "Country code and phone number are required!"
-  //     );
-  //   }
-
-  //   const existingUser = await userModel.findOne({
-  //     number,
-  //     countryCode,
-  //   });
-
-  //   if (existingUser) {
-  //     throw new ApiError(
-  //       status.CONFLICT,
-  //       "This phone number is already used!"
-  //     );
-  //   }
-
-  //   const fullPhoneNumber = `${countryCode}${number}`;
-
-  //   sentTo = fullPhoneNumber;
-  //   receiverType = "phone";
-  //   existingOTP = await checkOTPService(fullPhoneNumber, "phone");
-
-  // } else {
 
   if (!email) {
     throw new ApiError(status.BAD_REQUEST, "Email is required!");
@@ -207,9 +176,7 @@ const signUp = catchAsync(async (req, res) => {
   sentTo = email;
   receiverType = "email";
   existingOTP = await checkOTPService(email, "email");
-  // }
 
-  /* ---------- OTP ---------- */
   let message = "";
 
   if (existingOTP) {
@@ -300,30 +267,14 @@ const allUserController = catchAsync(async (req, res) => {
 
 // Validate OTP
 const otpVerification = catchAsync(async (req, res) => {
-  // console.log(req.body);
   const email = req.User?.email || req.body.email;
-  const number = req.User?.number || req.body.number;
-  const countryCode = req.User?.countryCode || req.body.countryCode;
-  // console.log({ email, number, countryCode });
 
-  const fullPhoneNumber =
-    number && countryCode ? `${countryCode}${number}` : null;
-  // console.log({ fullPhoneNumber });
   let otpData;
 
   if (email) {
     otpData = await verifyOTP(
       email,
       "email",
-      req.body.purpose,
-      req.body.otp
-    );
-  }
-
-  if (fullPhoneNumber) {
-    otpData = await verifyOTP(
-      fullPhoneNumber,
-      "phone",
       req.body.purpose,
       req.body.otp
     );
@@ -358,7 +309,6 @@ const otpVerification = catchAsync(async (req, res) => {
         number,
         countryCode,
       });
-      // console.log({ user });
     }
 
     const accessToken = resetTokenGenerator(user);
@@ -374,78 +324,6 @@ const otpVerification = catchAsync(async (req, res) => {
   }
 });
 
-const otpVerificationForPartner = catchAsync(async (req, res) => {
-  const email = req.User?.email || req.body.email;
-
-  if (!email) {
-    throw new ApiError(status.BAD_REQUEST, "Email required");
-  }
-
-  const otpData = await verifyOTP(
-    email,
-    "email",
-    req.body.purpose,
-    req.body.otp
-  );
-
-  if (!otpData) {
-    throw new ApiError(status.BAD_REQUEST, "Invalid OTP");
-  }
-
-  /* ---------- SIGNUP VERIFY ---------- */
-
-  if (otpData.purpose === "email-verification") {
-
-    const payload = {
-      email,
-      role: req.User.role,
-      password: req.User.password,
-      otpVerified: true
-    };
-
-    const accessToken = jwt.sign(
-      payload,
-      process.env.JWT_ACCESS_TOKEN,
-      { expiresIn: "30m" }
-    );
-
-    return res.status(status.CREATED).json(
-      response({
-        status: "OK",
-        message: "Email verified",
-        accessToken
-      })
-    );
-  }
-
-  /* ---------- FORGET PASSWORD ---------- */
-
-  if (otpData.purpose === "forget-password") {
-
-    const user = await getUserByEmail(email);
-
-    if (!user) {
-      throw new ApiError(status.NOT_FOUND, "User not found");
-    }
-
-    const accessToken = resetTokenGenerator(user);
-
-    const safeUser = {
-      _id: user._id,
-      email: user.email,
-      fullName: user.fullName
-    };
-
-    return res.status(status.OK).json(
-      response({
-        status: "OK",
-        message: "OTP verified",
-        accessToken
-      })
-    );
-  }
-
-});
 
 
 
@@ -786,7 +664,6 @@ module.exports = {
   updateProfile,
   userDetailsByID,
   myDocumentsController,
-  otpVerificationForPartner,
   allUserController,
   deleteAccountController,
   updateDocuments,

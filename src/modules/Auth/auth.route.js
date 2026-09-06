@@ -18,7 +18,6 @@ const {
   updateProfile,
   otpVerification,
   signUp,
-  allUserController,
   deleteAccountController,
   updateDocuments,
   socialLoginWithAppleController,
@@ -26,7 +25,7 @@ const {
 } = require("./auth.controller");
 ensureUploadFolderExists(UPLOADS_FOLDER_USERS);
 
-router.get("/admin/all", allUserController);
+
 
 router.post("/signin", localAuth);
 router.post("/google-login", socialLoginWithGoogleController);
@@ -36,11 +35,8 @@ router.post(
   "/sign-up",
   uploadUsers.fields([
     { name: "image", maxCount: 1 },
-    { name: "certificate", maxCount: 1 },
-    { name: "identityProof", maxCount: 1 },
-    { name: "businessCertification", maxCount: 1 },
-    { name: "bankStatement", maxCount: 1 }
   ]),
+  
   convertHeicToPng(UPLOADS_FOLDER_USERS),
   parseData(),
   signUp
