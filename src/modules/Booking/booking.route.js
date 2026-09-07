@@ -4,7 +4,8 @@ const { auth } = require('../../middlewares/auth');
 const {
   createBooking,
   getMyBookings,
-  getBookingDetails
+  getBookingDetails,
+  updateBookingStatus
 } = require('./booking.controller');
 
 // User creates a booking
@@ -13,6 +14,10 @@ router.post('/', auth(['user']), createBooking);
 
 // Get my bookings (Client or Instructor)
 router.get('/my-bookings', auth(['user', 'instructor']), getMyBookings);
+
+// Update booking status (accept, decline, complete, cancel)
+router.patch('/status/:id', auth(['user', 'instructor', 'admin']), updateBookingStatus);
+router.patch('/:id/status', auth(['user', 'instructor', 'admin']), updateBookingStatus);
 
 // Get specific booking details
 router.get('/:id', auth(['user', 'instructor', 'admin']), getBookingDetails);

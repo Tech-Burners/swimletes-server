@@ -323,6 +323,22 @@ const bookingSchema = new mongoose.Schema(
     review: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Review'
+    },
+    isClientReviewed: {
+      type: Boolean,
+      default: false
+    },
+    isInstructorReviewed: {
+      type: Boolean,
+      default: false
+    },
+    clientReview: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Review'
+    },
+    instructorReview: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Review'
     }
   },
   {

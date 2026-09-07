@@ -4,7 +4,8 @@ const { status } = require('http-status');
 const {
   createBookingService,
   getMyBookingsService,
-  getBookingByIdService
+  getBookingByIdService,
+  updateBookingStatusService
 } = require('./booking.service');
 
 // User creates a booking
@@ -47,8 +48,30 @@ const getBookingDetails = catchAsync(async (req, res) => {
   );
 });
 
+// Update booking status (e.g. accepted, declined, completed, cancelled)
+const updateBookingStatus = catchAsync(async (req, res) => {
+  const { status: newStatus, reason } = req.body;
+  const result = await updateBookingStatusService(
+    req.params.id,
+    req.User._id,
+    req.User.role,
+    newStatus,
+    { reason }
+  );
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      message: `Booking status updated to ${newStatus}`,
+      data: result
+    })
+  );
+});
+
 module.exports = {
   createBooking,
   getMyBookings,
-  getBookingDetails
+  getBookingDetails,
+  updateBookingStatus
 };
+

@@ -18,6 +18,22 @@ const userSchema = new mongoose.Schema({
     enum: ["local", "google", "apple"],
     default: "local",
   },
+  avgRating: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 5,
+  },
+  totalReviews: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  ratingCount: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
 },
   {
     timestamps: true

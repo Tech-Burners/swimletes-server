@@ -6,6 +6,7 @@ const userRoutes = require('../modules/User/user.route');
 const availabilityRoutes = require('../modules/Availability/availability.route');
 const serviceAndPricingRoutes = require('../modules/ServiceAndPricing/serviceAndPricing.route');
 const bookingRoutes = require('../modules/Booking/booking.route');
+const reviewRoutes = require('../modules/Review/review.route');
 
 
 const moduleRoutes = [
@@ -32,6 +33,10 @@ const moduleRoutes = [
   {
     path: '/booking',
     route: bookingRoutes
+  },
+  {
+    path: '/review',
+    route: reviewRoutes
   },
 ];
 

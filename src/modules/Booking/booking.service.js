@@ -108,7 +108,9 @@ const getBookingByIdService = async (bookingId, userId) => {
   const booking = await Booking.findById(bookingId)
     .populate('client', 'fullName email image')
     .populate('instructor', 'fullName email image')
-    .populate('location.pool');
+    .populate('location.pool')
+    .populate('clientReview')
+    .populate('instructorReview');
 
   if (!booking) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
@@ -117,8 +119,56 @@ const getBookingByIdService = async (bookingId, userId) => {
   return booking;
 };
 
+const updateBookingStatusService = async (bookingId, userId, userRole, status, payload = {}) => {
+  const validStatuses = ['accepted', 'declined', 'active', 'completed', 'cancelled'];
+  if (!validStatuses.includes(status)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, `Invalid status. Must be one of: ${validStatuses.join(', ')}`);
+  }
+
+  const booking = await Booking.findById(bookingId);
+  if (!booking) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
+  }
+
+  const isClient = booking.client.toString() === userId.toString();
+  const isInstructor = booking.instructor.toString() === userId.toString();
+  const isAdmin = userRole === 'admin';
+
+  if (!isClient && !isInstructor && !isAdmin) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'You are not authorized to update this booking');
+  }
+
+  // Role permissions on status transitions
+  if (['accepted', 'declined'].includes(status) && !isInstructor && !isAdmin) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Only instructors or admins can accept or decline bookings');
+  }
+
+  if (status === 'completed' && !isInstructor && !isAdmin) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Only instructors or admins can mark a booking as completed');
+  }
+
+  booking.status = status;
+
+  if (status === 'declined') {
+    booking.declinedReason = payload.reason || '';
+    booking.declinedAt = new Date();
+  } else if (status === 'cancelled') {
+    booking.cancelledBy = isClient ? 'client' : (isInstructor ? 'instructor' : 'admin');
+    booking.cancellationReason = payload.reason || '';
+    booking.cancelledAt = new Date();
+  } else if (status === 'completed') {
+    booking.completedAt = new Date();
+  }
+
+  await booking.save();
+
+  return booking;
+};
+
 module.exports = {
   createBookingService,
   getMyBookingsService,
-  getBookingByIdService
+  getBookingByIdService,
+  updateBookingStatusService
 };
+
