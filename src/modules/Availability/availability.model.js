@@ -54,15 +54,7 @@ const availabilitySchema = new mongoose.Schema(
         { day: 'saturday', isAvailable: true, slots: [{ startTime: '09:00 AM', endTime: '02:00 PM' }] },
         { day: 'sunday', isAvailable: false, slots: [] }
       ]
-    },
-
-    // Custom blackout / unavailable dates
-    customUnavailability: [
-      {
-        date: { type: Date, required: true },
-        reason: { type: String, default: '' }
-      }
-    ]
+    }
   },
   {
     timestamps: true

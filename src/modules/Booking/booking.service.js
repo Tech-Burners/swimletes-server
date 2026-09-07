@@ -98,7 +98,6 @@ const getMyBookingsService = async (userId, role, statusFilter) => {
   const bookings = await Booking.find(query)
     .populate('client', 'fullName email image')
     .populate('instructor', 'fullName email image')
-    .populate('location.pool')
     .sort({ createdAt: -1 });
 
   return bookings;
@@ -108,7 +107,6 @@ const getBookingByIdService = async (bookingId, userId) => {
   const booking = await Booking.findById(bookingId)
     .populate('client', 'fullName email image')
     .populate('instructor', 'fullName email image')
-    .populate('location.pool')
     .populate('clientReview')
     .populate('instructorReview');
 

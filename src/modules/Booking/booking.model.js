@@ -82,11 +82,6 @@ const bookingLocationSchema = new mongoose.Schema(
       ],
       required: true
     },
-    pool: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Pool',
-      required: false
-    },
     poolName: {
       type: String,
       default: '' // e.g. "Oak Lawn Community Pool"

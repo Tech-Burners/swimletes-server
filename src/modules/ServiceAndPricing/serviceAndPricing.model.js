@@ -1,5 +1,42 @@
 const mongoose = require('mongoose');
 
+// Embedded Public Pool sub-schema (Figma: Add pool modal)
+const publicPoolSchema = new mongoose.Schema(
+  {
+    poolName: {
+      type: String,
+      required: true,
+      trim: true // e.g. "Riverside Community Pool" or "Oak Lawn Community Pool"
+    },
+    address: {
+      type: String,
+      required: true,
+      trim: true // e.g. "123 Main Street, Austin, TX"
+    },
+    location: {
+      type: {
+        type: String,
+        enum: ['Point'],
+        default: 'Point'
+      },
+      coordinates: {
+        type: [Number],
+        default: [0, 0] // [longitude, latitude]
+      }
+    },
+    hasEntryFee: {
+      type: Boolean,
+      default: false
+    },
+    entryFee: {
+      type: Number,
+      default: 0,
+      min: 0 // e.g. 8.00 or 10.00
+    }
+  },
+  { _id: true }
+);
+
 const serviceAndPricingSchema = new mongoose.Schema(
   {
     instructor: {
@@ -59,12 +96,7 @@ const serviceAndPricingSchema = new mongoose.Schema(
     // 5. Location Option: Public / Community pools
     publicPools: {
       enabled: { type: Boolean, default: false },
-      pools: [
-        {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: 'Pool'
-        }
-      ]
+      pools: [publicPoolSchema]
     },
 
     // 6. Target student age groups

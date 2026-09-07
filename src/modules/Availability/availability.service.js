@@ -32,7 +32,6 @@ const updateAvailabilityService = async (instructorId, payload) => {
     });
   } else {
     if (payload.weeklySchedule) availability.weeklySchedule = payload.weeklySchedule;
-    if (payload.customUnavailability) availability.customUnavailability = payload.customUnavailability;
   }
   await availability.save();
   return availability;

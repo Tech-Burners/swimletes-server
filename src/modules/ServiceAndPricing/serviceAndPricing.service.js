@@ -27,14 +27,13 @@ const createOrUpdateServiceAndPricing = async (instructorId, payload) => {
 };
 
 const getMyServiceAndPricing = async (instructorId) => {
-  const serviceAndPricing = await ServiceAndPricing.findOne({ instructor: instructorId }).populate('publicPools.pools');
+  const serviceAndPricing = await ServiceAndPricing.findOne({ instructor: instructorId });
   return serviceAndPricing;
 };
 
 const getInstructorServiceAndPricing = async (instructorId) => {
   const serviceAndPricing = await ServiceAndPricing.findOne({ instructor: instructorId })
-    .populate('instructor', 'fullName email image')
-    .populate('publicPools.pools');
+    .populate('instructor', 'fullName email image');
 
   if (!serviceAndPricing) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Service and pricing not found for this instructor');
