@@ -12,7 +12,8 @@ router.post('/', auth(['instructor']), saveServiceAndPricing);
 router.put('/', auth(['instructor']), saveServiceAndPricing);
 router.get('/my-service', auth(['instructor']), getMyService);
 
-// Public / Client route
+// Public / Client routes
+router.get('/details/:instructorId', getInstructorService);
 router.get('/:instructorId', getInstructorService);
 
 module.exports = router;

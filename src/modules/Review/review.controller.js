@@ -1,7 +1,7 @@
 const catchAsync = require('../../helpers/catchAsync');
 const response = require('../../helpers/response');
 const { status } = require('http-status');
-const { createReviewService } = require('./review.service');
+const { createReviewService, getInstructorReviewsService } = require('./review.service');
 
 // Mutual Review: User -> Instructor OR Instructor -> User
 const createReview = catchAsync(async (req, res) => {
@@ -17,6 +17,21 @@ const createReview = catchAsync(async (req, res) => {
   );
 });
 
+// Public: Get instructor reviews, rating distribution, and filtered list
+const getInstructorReviews = catchAsync(async (req, res) => {
+  const result = await getInstructorReviewsService(req.params.instructorId, req.query);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      type: 'Review',
+      message: 'Instructor reviews fetched successfully',
+      data: result
+    })
+  );
+});
+
 module.exports = {
-  createReview
+  createReview,
+  getInstructorReviews
 };

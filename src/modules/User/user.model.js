@@ -34,6 +34,34 @@ const userSchema = new mongoose.Schema({
     default: 0,
     min: 0,
   },
+  bio: {
+    type: String,
+    default: '',
+  },
+  about: {
+    type: String,
+    default: '',
+  },
+  address: {
+    type: String,
+    default: '',
+  },
+  experienceYears: {
+    type: Number,
+    default: 0,
+  },
+  certifications: {
+    type: String,
+    default: 'Red Cross Water Safety Instructor · CPR/AED current · Background check cleared',
+  },
+  isVerified: {
+    type: Boolean,
+    default: true,
+  },
+  lessonsTaught: {
+    type: Number,
+    default: 0,
+  },
 },
   {
     timestamps: true

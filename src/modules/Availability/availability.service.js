@@ -86,10 +86,96 @@ const toggleDayService = async (instructorId, day, isAvailable) => {
   return availability;
 };
 
+/**
+ * Get instructor date-specific slots and 7-day availability view (matching Figma Availability tab)
+ */
+const getInstructorSlotsService = async (instructorId, queryDate) => {
+  const Booking = require('../Booking/booking.model');
+  const availability = await getAvailabilityByInstructorId(instructorId);
+
+  const targetDate = queryDate ? new Date(queryDate) : new Date();
+  if (isNaN(targetDate.getTime())) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid date format. Use YYYY-MM-DD');
+  }
+
+  const daysOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const dayShortNames = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+
+  const selectedDayName = daysOfWeek[targetDate.getDay()];
+  const daySchedule = availability.weeklySchedule.find(
+    (item) => item.day.toLowerCase() === selectedDayName.toLowerCase()
+  );
+
+  // 1. Fetch bookings for selected date
+  const startOfDay = new Date(targetDate);
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date(targetDate);
+  endOfDay.setHours(23, 59, 59, 999);
+
+  const existingBookings = await Booking.find({
+    instructor: instructorId,
+    date: { $gte: startOfDay, $lte: endOfDay },
+    status: { $in: ['pending', 'accepted', 'active', 'completed'] }
+  });
+
+  const bookedStartTimes = new Set(existingBookings.map((b) => b.startTime));
+
+  // 2. Mark slots with isBooked
+  const slots = (daySchedule?.slots || []).map((slot) => {
+    const isBooked = bookedStartTimes.has(slot.startTime);
+    return {
+      _id: slot._id,
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+      isBooked: isBooked
+    };
+  });
+
+  // 3. Build 7-day calendar strip
+  const calendarWeek = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(targetDate);
+    d.setDate(d.getDate() + i);
+    const dDayName = daysOfWeek[d.getDay()];
+    const dDayShort = dayShortNames[d.getDay()];
+    const dDaySchedule = availability.weeklySchedule.find(
+      (item) => item.day.toLowerCase() === dDayName.toLowerCase()
+    );
+
+    const isDayAvail = dDaySchedule?.isAvailable && (dDaySchedule.slots?.length || 0) > 0;
+    const totalDaySlots = dDaySchedule?.slots?.length || 0;
+
+    let statusText = 'closed';
+    if (isDayAvail) {
+      statusText = `${totalDaySlots} open`;
+    }
+
+    calendarWeek.push({
+      date: d.toISOString().split('T')[0],
+      dayName: dDayName,
+      dayShort: dDayShort,
+      dayNumber: d.getDate(),
+      isAvailable: isDayAvail,
+      totalSlots: totalDaySlots,
+      statusText: statusText
+    });
+  }
+
+  return {
+    instructorId,
+    selectedDate: targetDate.toISOString().split('T')[0],
+    selectedDay: selectedDayName,
+    isAvailable: daySchedule?.isAvailable || false,
+    slots,
+    calendarWeek
+  };
+};
+
 module.exports = {
   getAvailabilityByInstructorId,
   updateAvailabilityService,
   addSlotService,
   removeSlotService,
-  toggleDayService
+  toggleDayService,
+  getInstructorSlotsService
 };

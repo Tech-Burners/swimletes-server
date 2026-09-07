@@ -391,16 +391,19 @@ const getUserById = async (id) => {
 const updateUserById = async (id, data) => {
   console.log({id, data });
   const userPayload = {
-    fullName: data.fullName,
-    image: data.image,
-    email: data.email,
-    location: data.location,
-    address: data.address,
-    // whatsappNumber: data.whatsappNumber,
-    number: data.number,
-    countryCode: data.countryCode
+    ...(data.fullName !== undefined && { fullName: data.fullName }),
+    ...(data.image !== undefined && { image: data.image }),
+    ...(data.email !== undefined && { email: data.email }),
+    ...(data.location !== undefined && { location: data.location }),
+    ...(data.address !== undefined && { address: data.address }),
+    ...(data.number !== undefined && { number: data.number }),
+    ...(data.countryCode !== undefined && { countryCode: data.countryCode }),
+    ...(data.bio !== undefined && { bio: data.bio }),
+    ...(data.about !== undefined && { about: data.about }),
+    ...(data.experienceYears !== undefined && { experienceYears: Number(data.experienceYears) }),
+    ...(data.certifications !== undefined && { certifications: data.certifications }),
+    ...(data.lessonsTaught !== undefined && { lessonsTaught: Number(data.lessonsTaught) }),
   };
-  // console.log({ userPayload });
   const user = await userModel.findByIdAndUpdate(id, userPayload, { new: true });
   // console.log({ user });
 

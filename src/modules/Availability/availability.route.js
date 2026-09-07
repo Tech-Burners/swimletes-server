@@ -7,7 +7,8 @@ const {
   updateAvailability,
   addTimeSlot,
   removeTimeSlot,
-  toggleDayAvailability
+  toggleDayAvailability,
+  getInstructorSlots
 } = require('./availability.controller');
 
 // Instructor routes (Protected)
@@ -17,7 +18,8 @@ router.post('/add-slot', auth(['instructor']), addTimeSlot);
 router.delete('/slot/:day/:slotId', auth(['instructor']), removeTimeSlot);
 router.patch('/toggle-day', auth(['instructor']), toggleDayAvailability);
 
-// Public / Client route to check an instructor's availability
+// Public / Client routes
+router.get('/:instructorId/slots', getInstructorSlots);
 router.get('/:instructorId', getInstructorAvailability);
 
 module.exports = router;

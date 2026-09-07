@@ -46,11 +46,11 @@ const serviceAndPricingSchema = new mongoose.Schema(
       unique: true
     },
 
-    // 1. Durations supported in minutes
-    durations: {
-      type: [Number],
+    // 1. Lesson duration in minutes (e.g. 60)
+    duration: {
+      type: Number,
       enum: [30, 45, 60, 90],
-      default: [60]
+      default: 60
     },
 
     // 2. Base price per lesson

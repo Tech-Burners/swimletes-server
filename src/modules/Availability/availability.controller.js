@@ -6,7 +6,8 @@ const {
   updateAvailabilityService,
   addSlotService,
   removeSlotService,
-  toggleDayService
+  toggleDayService,
+  getInstructorSlotsService
 } = require('./availability.service');
 
 // Get my availability (logged in instructor)
@@ -90,11 +91,27 @@ const toggleDayAvailability = catchAsync(async (req, res) => {
   );
 });
 
+// Public / Client: Get instructor date-specific slots and 7-day availability view
+const getInstructorSlots = catchAsync(async (req, res) => {
+  const { instructorId } = req.params;
+  const { date } = req.query;
+  const result = await getInstructorSlotsService(instructorId, date);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      message: 'Instructor date slots fetched successfully',
+      data: result
+    })
+  );
+});
+
 module.exports = {
   getMyAvailability,
   getInstructorAvailability,
   updateAvailability,
   addTimeSlot,
   removeTimeSlot,
-  toggleDayAvailability
+  toggleDayAvailability,
+  getInstructorSlots
 };
