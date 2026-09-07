@@ -1,6 +1,6 @@
 const { default: status } = require("http-status");
 const catchAsync = require("../../helpers/catchAsync");
-const { suspendUserService, activeUserService, giveNoteService, giveCreditService, fcmTokenService, deleteFcmTokenService, bulkGiveFlagService, bulkGiveNoteService, bulkGiveCreditService, bulkSuspendUserService, bulkActiveUserService, togglePushNotificationService, getPushNotificationService } = require("./user.service");
+const { suspendUserService, activeUserService, giveNoteService, giveCreditService, fcmTokenService, deleteFcmTokenService, bulkGiveFlagService, bulkGiveNoteService, bulkGiveCreditService, bulkSuspendUserService, bulkActiveUserService, togglePushNotificationService, getPushNotificationService, getUserHomeFeedService } = require("./user.service");
 const response = require("../../helpers/response");
 
 const suspendUserController = catchAsync(async (req, res) => {
@@ -246,6 +246,20 @@ const deleteFcmTokenController = catchAsync(async (req, res) => {
   return res.status(status.OK).json(response({ statusCode: status.OK, message:'fcm-token-deleted', status: "OK" }));
 })
 
+// Instructors List (Top Rated Instructors Near You - Figma 40012130:6616)
+const getUserHomeController = catchAsync(async (req, res) => {
+  const userId = req.User ? req.User._id : null;
+  const result = await getUserHomeFeedService(userId, req.query);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      type: 'Instructors',
+      message: 'Instructors fetched successfully',
+      data: result
+    })
+  );
+});
 
 module.exports = {
   suspendUserController,
@@ -262,5 +276,6 @@ module.exports = {
   bulkSuspendUserController,
   bulkActiveUserController,
   togglePushNotificationController,
-  getPushNotificationController
+  getPushNotificationController,
+  getUserHomeController
 }

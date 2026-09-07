@@ -10,8 +10,12 @@ const uploadUsers = userFileUploadMiddleware(UPLOADS_FOLDER_USERS);
 const convertHeicToPng = require('../../middlewares/converter');
 const ensureUploadFolderExists = require('../../helpers/fileExists');
 const parseData = require('../../middlewares/parseData');
-const { suspendUserController, activeUserController, addFlagController, addNoteController, addCreditController,checkServiceAvailability, fcmTokenController, deleteFcmTokenController, bulkAddFlagController, bulkAddNoteController, bulkAddCreditController, bulkSuspendUserController, bulkActiveUserController, togglePushNotificationController, getPushNotificationController } = require("./user.controller");
+const { suspendUserController, activeUserController, addFlagController, addNoteController, addCreditController,checkServiceAvailability, fcmTokenController, deleteFcmTokenController, bulkAddFlagController, bulkAddNoteController, bulkAddCreditController, bulkSuspendUserController, bulkActiveUserController, togglePushNotificationController, getPushNotificationController, getUserHomeController } = require("./user.controller");
 ensureUploadFolderExists(UPLOADS_FOLDER_USERS);
+
+// User Home / Dashboard (Top Rated Instructors Near You - Figma 40012130:6616)
+router.get("/home", tokenCheck, getUserHomeController);
+router.get("/top-instructors", tokenCheck, getUserHomeController);
 
 router.patch("/ban/:id", suspendUserController)
 router.patch("/bulk-suspend",auth(['admin', 'sub_admin']),bulkSuspendUserController);
