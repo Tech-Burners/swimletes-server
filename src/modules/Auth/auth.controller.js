@@ -93,34 +93,19 @@ const localAuth = catchAsync(async (req, res) => {
     );
   }
 
-  // console.log({ user });
-  let admin;
-  // if (user.role === 'admin' || user.role === 'hr') {
-  if (['admin', 'hr', 'sub_hr_admin', 'sub_admin'].includes(user.role)) {
-    // console.log("role", user.role)
-    admin = await getAdminByUserId(user._id);
-  }
-  const token = await tokenGenerator(user, admin);
-  const refreshToken = refreshTokenGenerator(user);
+  const token = await tokenGenerator(user);
 
   return res.status(status.OK).json(response({
     status: "OK",
     statusCode: status.OK,
     message: "Login successful",
-    data: {
-      _id: user._id,
-      email: user.email,
-      number: user.number,
-      countryCode: user.countryCode,
-      fullName: user.fullName,
+    data:{
+      userName : user.fullName,
       role: user.role,
-      image: user.image,
-      isVerified: user.isVerified,
-      categoryPermissions: admin?.categoryPermissions,
-      parent: admin?.parent
+      image: user.image
+            
     },
-    accessToken: token,
-    refreshToken: refreshToken
+    accessToken: token
   }));
 });
 

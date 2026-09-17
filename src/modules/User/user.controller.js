@@ -1,14 +1,46 @@
 const { default: status } = require("http-status");
 const catchAsync = require("../../helpers/catchAsync");
-const { suspendUserService, activeUserService, giveNoteService, giveCreditService, fcmTokenService, deleteFcmTokenService, bulkGiveFlagService, bulkGiveNoteService, bulkGiveCreditService, bulkSuspendUserService, bulkActiveUserService, togglePushNotificationService, getPushNotificationService, getUserHomeFeedService } = require("./user.service");
+const {
+  suspendUserService,
+  banUserService,
+  activeUserService,
+  giveNoteService,
+  giveCreditService,
+  fcmTokenService,
+  deleteFcmTokenService,
+  bulkGiveFlagService,
+  bulkGiveNoteService,
+  bulkGiveCreditService,
+  bulkSuspendUserService,
+  bulkActiveUserService,
+  togglePushNotificationService,
+  getPushNotificationService,
+  getUserHomeFeedService,
+  updateUserLocationService,
+  getAdminClientsListService,
+  getAdminClientDetailsService,
+  getAdminClientReviewsService,
+  updateClientStatusService,
+  getAdminInstructorsListService,
+  getAdminInstructorDetailsService,
+  getAdminInstructorReviewsService,
+  updateInstructorStatusService
+} = require("./user.service");
 const response = require("../../helpers/response");
 
 const suspendUserController = catchAsync(async (req, res) => {
   const result = await suspendUserService(req.params.id);
   return res.status(status.OK).json(response({
-    status: 'success', statusCode: status.OK, type: "User", message: "User suspended successfully", data: {name : result.fullName}
+    status: 'success', statusCode: status.OK, type: "User", message: "User suspended successfully", data: { name: result?.fullName }
   }));
-})
+});
+
+const banUserController = catchAsync(async (req, res) => {
+  const result = await banUserService(req.params.id);
+  return res.status(status.OK).json(response({
+    status: 'success', statusCode: status.OK, type: "User", message: "User banned successfully", data: { name: result?.fullName }
+  }));
+});
 
 
 const bulkSuspendUserController = catchAsync(async (req, res) => {
@@ -246,7 +278,7 @@ const deleteFcmTokenController = catchAsync(async (req, res) => {
   return res.status(status.OK).json(response({ statusCode: status.OK, message:'fcm-token-deleted', status: "OK" }));
 })
 
-// Instructors List (Top Rated Instructors Near You - Figma 40012130:6616)
+// Instructors List (Top Rated Instructors Near You - Figma 40010003:11)
 const getUserHomeController = catchAsync(async (req, res) => {
   const userId = req.User ? req.User._id : null;
   const result = await getUserHomeFeedService(userId, req.query);
@@ -254,8 +286,135 @@ const getUserHomeController = catchAsync(async (req, res) => {
     response({
       status: 'OK',
       statusCode: status.OK,
-      type: 'Instructors',
-      message: 'Instructors fetched successfully',
+      type: 'HomeFeed',
+      message: 'Home feed fetched successfully',
+      data: result
+    })
+  );
+});
+
+// Update User Location / Address (Figma 40010003:11 location dropdown)
+const updateUserLocationController = catchAsync(async (req, res) => {
+  const userId = req.User._id;
+  const result = await updateUserLocationService(userId, req.body);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      type: 'User',
+      message: 'User location updated successfully',
+      data: result
+    })
+  );
+});
+
+// Admin Clients List (Figma 40012554:16625)
+const getAdminClientsListController = catchAsync(async (req, res) => {
+  const result = await getAdminClientsListService(req.query);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      type: 'AdminClients',
+      message: 'Admin clients list fetched successfully',
+      data: result
+    })
+  );
+});
+
+// Admin Client Details Drawer (Figma 40012525:10033 - Details tab)
+const getAdminClientDetailsController = catchAsync(async (req, res) => {
+  const result = await getAdminClientDetailsService(req.params.id);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      type: 'AdminClientDetails',
+      message: 'Admin client details fetched successfully',
+      data: result
+    })
+  );
+});
+
+// Admin Client Reviews Drawer (Figma 40012525:10665 - Reviews tab)
+const getAdminClientReviewsController = catchAsync(async (req, res) => {
+  const result = await getAdminClientReviewsService(req.params.id, req.query);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      type: 'AdminClientReviews',
+      message: 'Admin client reviews fetched successfully',
+      data: result
+    })
+  );
+});
+
+// Update Client Status (active, suspended, banned)
+const updateClientStatusController = catchAsync(async (req, res) => {
+  const result = await updateClientStatusService(req.params.id, req.body);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      type: 'AdminClientStatus',
+      message: `Client status updated to ${req.body.status} successfully`,
+      data: result
+    })
+  );
+});
+
+// Admin Instructors List (Figma 40012554:17155)
+const getAdminInstructorsListController = catchAsync(async (req, res) => {
+  const result = await getAdminInstructorsListService(req.query);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      type: 'AdminInstructors',
+      message: 'Admin instructors list fetched successfully',
+      data: result
+    })
+  );
+});
+
+// Admin Instructor Details Drawer (Figma 40012525:13366 - Details Tab)
+const getAdminInstructorDetailsController = catchAsync(async (req, res) => {
+  const result = await getAdminInstructorDetailsService(req.params.id);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      type: 'AdminInstructorDetails',
+      message: 'Admin instructor details fetched successfully',
+      data: result
+    })
+  );
+});
+
+// Admin Instructor Reviews Drawer (Figma 40012525:14227 - Reviews Tab)
+const getAdminInstructorReviewsController = catchAsync(async (req, res) => {
+  const result = await getAdminInstructorReviewsService(req.params.id, req.query);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      type: 'AdminInstructorReviews',
+      message: 'Admin instructor reviews fetched successfully',
+      data: result
+    })
+  );
+});
+
+// Update Instructor Status & Verification (active, suspended, banned, pending)
+const updateInstructorStatusController = catchAsync(async (req, res) => {
+  const result = await updateInstructorStatusService(req.params.id, req.body);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      type: 'AdminInstructorStatus',
+      message: `Instructor updated successfully`,
       data: result
     })
   );
@@ -263,6 +422,7 @@ const getUserHomeController = catchAsync(async (req, res) => {
 
 module.exports = {
   suspendUserController,
+  banUserController,
   fcmTokenController,
   deleteFcmTokenController,
   addFlagController,
@@ -277,5 +437,14 @@ module.exports = {
   bulkActiveUserController,
   togglePushNotificationController,
   getPushNotificationController,
-  getUserHomeController
-}
+  getUserHomeController,
+  updateUserLocationController,
+  getAdminClientsListController,
+  getAdminClientDetailsController,
+  getAdminClientReviewsController,
+  updateClientStatusController,
+  getAdminInstructorsListController,
+  getAdminInstructorDetailsController,
+  getAdminInstructorReviewsController,
+  updateInstructorStatusController
+};

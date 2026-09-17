@@ -7,7 +7,8 @@ const availabilityRoutes = require('../modules/Availability/availability.route')
 const serviceAndPricingRoutes = require('../modules/ServiceAndPricing/serviceAndPricing.route');
 const bookingRoutes = require('../modules/Booking/booking.route');
 const reviewRoutes = require('../modules/Review/review.route');
-
+const favouriteRoutes = require('../modules/Favourite/favourite.route');
+const reportRoutes = require('../modules/Report/report.route');
 
 const moduleRoutes = [
   {
@@ -38,6 +39,22 @@ const moduleRoutes = [
     path: '/review',
     route: reviewRoutes
   },
+  {
+    path: '/favourite',
+    route: favouriteRoutes
+  },
+  {
+    path: '/report',
+    route: reportRoutes
+  },
+  {
+    path: '/reports',
+    route: reportRoutes
+  },
+  {
+    path: '/disputes',
+    route: reportRoutes
+  }
 ];
 
 

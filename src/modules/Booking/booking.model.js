@@ -80,7 +80,7 @@ const bookingLocationSchema = new mongoose.Schema(
         'instructor_pool',  // "Use instructor's pool"
         'client_pool'       // "Travel to family's private pool"
       ],
-      required: true
+      default: 'public_pool'
     },
     poolName: {
       type: String,
@@ -273,6 +273,12 @@ const bookingSchema = new mongoose.Schema(
       index: true
     },
 
+    // Request Expiration (For pending booking requests - default 24h)
+    expiresAt: {
+      type: Date,
+      default: () => new Date(Date.now() + 24 * 60 * 60 * 1000)
+    },
+
     // Decline Information
     declinedReason: {
       type: String,
@@ -334,6 +340,9 @@ const bookingSchema = new mongoose.Schema(
     instructorReview: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Review'
+    },
+    lastRemindedAt: {
+      type: Date
     }
   },
   {

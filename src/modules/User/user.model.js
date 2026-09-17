@@ -8,6 +8,7 @@ const userSchema = new mongoose.Schema({
   countryCode: { type: String, required: false },
   image: { type: String, required: false, default: 'user.jpg' },
   role: { type: String, enum: ['user', 'instructor', 'admin'], default: 'user' },
+  status: { type: String, enum: ['active', 'suspended', 'banned', 'pending'], default: 'active' },
   isBan: { type: Boolean, default: false },
   isDeleted: { type: Boolean, default: false },
   password: { type: String, required: false },
@@ -50,15 +51,56 @@ const userSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  instructorType: {
+    type: String,
+    enum: ['certified', 'experience_based'],
+    default: 'certified'
+  },
   certifications: {
     type: String,
-    default: 'Red Cross Water Safety Instructor · CPR/AED current · Background check cleared',
+    default: '',
+  },
+  certificationsList: [
+    {
+      name: { type: String },
+      issuer: { type: String },
+      expiryDate: { type: String },
+      fileName: { type: String },
+      fileUrl: { type: String }
+    }
+  ],
+  cprCertification: {
+    name: { type: String },
+    issuer: { type: String },
+    expiryDate: { type: String },
+    fileName: { type: String },
+    fileUrl: { type: String }
+  },
+  firstAidCertification: {
+    name: { type: String },
+    issuer: { type: String },
+    expiryDate: { type: String },
+    fileName: { type: String },
+    fileUrl: { type: String }
+  },
+  backgroundCheck: {
+    idType: { type: String },
+    idNumber: { type: String },
+    documentName: { type: String },
+    documentUrl: { type: String },
+    issuer: { type: String },
+    isConsentConfirmed: { type: Boolean },
+    status: { type: String, enum: ['pending', 'cleared', 'rejected'] }
   },
   isVerified: {
     type: Boolean,
     default: true,
   },
   lessonsTaught: {
+    type: Number,
+    default: 0,
+  },
+  totalEarnings: {
     type: Number,
     default: 0,
   },

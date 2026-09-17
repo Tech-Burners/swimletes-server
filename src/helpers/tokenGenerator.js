@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 
-const tokenGenerator = async (user, admin) => {
+const tokenGenerator = async (user) => {
 
   const payload = {
     _id: user._id,
@@ -12,30 +12,12 @@ const tokenGenerator = async (user, admin) => {
     // isLoginToken: user.isLoginToken ? user.isLoginToken : false
     tokenVersion: user.tokenVersion
   }
-  if (admin && admin !== null && admin !== 'null') {
-    payload.categoryPermissions = admin.categoryPermissions,
-    payload.isSupperAdmin = admin.isSupperAdmin,
-    payload.parent = admin.parent
-  }
   // console.log("payload", payload);
   return await jwt.sign(payload, process.env.JWT_ACCESS_TOKEN, {
     expiresIn: '1y',
   });
 }
 
-
-const refreshTokenGenerator = (user) => {
-  return jwt.sign(
-    {
-      _id: user._id,
-      tokenVersion: user.tokenVersion
-    },
-    process.env.JWT_REFRESH_TOKEN,
-    {
-      expiresIn: '7d'
-    }
-  );
-};
 
 
 
@@ -54,4 +36,4 @@ const resetTokenGenerator = (user) => {
 
 
 
-module.exports = { tokenGenerator, refreshTokenGenerator, resetTokenGenerator };
+module.exports = { tokenGenerator, resetTokenGenerator };
