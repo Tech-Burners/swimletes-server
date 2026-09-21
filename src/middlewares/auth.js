@@ -2,7 +2,7 @@ const jwt = require('jsonwebtoken');
 const catchAsync = require('../helpers/catchAsync');
 const { status } = require("http-status");
 const ApiError = require('../helpers/ApiError');
-const { getUserById } = require('../modules/Auth/auth.service');
+const { getUserById, getUserByEmail } = require('../modules/Auth/auth.service');
 const jwksClient = require("jwks-rsa");
 
 const appleClient = jwksClient({
@@ -163,4 +163,75 @@ const requirePermission = catchAsync((permission) => {
 
 
 
-module.exports = { auth, tokenCheck, requirePermission, resetTokenCheck, verifyAppleToken };
+const authOrOnboarding = (userRoles, { optional = false } = {}) => {
+  return catchAsync(async (req, res, next) => {
+    const { authorization } = req.headers;
+
+    if (!authorization || !authorization.startsWith("Bearer ")) {
+      if (optional) {
+        req.User = null;
+        return next();
+      }
+      throw new ApiError(status.UNAUTHORIZED, "Unauthorized - Bearer token required");
+    }
+
+    const token = authorization.split(" ")[1];
+    let decodedData;
+
+    try {
+      decodedData = jwt.verify(token, process.env.JWT_ACCESS_TOKEN);
+    } catch (err) {
+      if (optional) {
+        req.User = null;
+        return next();
+      }
+      throw new ApiError(status.UNAUTHORIZED, "Invalid or expired token");
+    }
+
+    // 1. Existing user in DB with _id
+    if (decodedData._id) {
+      const user = await getUserById(decodedData._id);
+      if (!user) throw new ApiError(status.NOT_FOUND, "User not found");
+
+      if (userRoles && !userRoles.includes(user.role)) {
+        throw new ApiError(status.FORBIDDEN, "You are not authorized for this action");
+      }
+
+      if (decodedData.tokenVersion !== undefined && user.tokenVersion !== undefined && decodedData.tokenVersion !== user.tokenVersion) {
+        throw new ApiError(status.UNAUTHORIZED, "Session expired. Please login again.");
+      }
+
+      req.User = { ...decodedData, _id: user._id, role: user.role };
+      req.dbUser = user;
+      return next();
+    }
+
+    // 2. Existing user in DB found by email
+    if (decodedData.email) {
+      const user = await getUserByEmail(decodedData.email);
+      if (user) {
+        if (userRoles && !userRoles.includes(user.role)) {
+          throw new ApiError(status.FORBIDDEN, "You are not authorized for this action");
+        }
+        req.User = { ...decodedData, _id: user._id, role: user.role };
+        req.dbUser = user;
+        return next();
+      }
+    }
+
+    // 3. Onboarding user (OTP verified, not yet in DB)
+    if (!decodedData.isOtpVerified) {
+      throw new ApiError(status.UNAUTHORIZED, "Please verify OTP before proceeding with onboarding");
+    }
+
+    if (userRoles && decodedData.role && !userRoles.includes(decodedData.role)) {
+      throw new ApiError(status.FORBIDDEN, "Role not authorized for this action");
+    }
+
+    req.User = decodedData;
+    req.dbUser = null;
+    next();
+  });
+};
+
+module.exports = { auth, authOrOnboarding, tokenCheck, requirePermission, resetTokenCheck, verifyAppleToken };

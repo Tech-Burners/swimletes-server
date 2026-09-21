@@ -35,6 +35,8 @@ const userSchema = new mongoose.Schema({
     default: 0,
     min: 0,
   },
+  dob: { type: String, default: '' },
+  dateOfBirth: { type: String, default: '' },
   bio: {
     type: String,
     default: '',
@@ -62,39 +64,44 @@ const userSchema = new mongoose.Schema({
   },
   certificationsList: [
     {
-      name: { type: String },
-      issuer: { type: String },
-      expiryDate: { type: String },
-      fileName: { type: String },
-      fileUrl: { type: String }
+      name: { type: String, default: '' },
+      issuer: { type: String, default: '' },
+      expiryDate: { type: String, default: '' },
+      fileName: { type: String, default: '' },
+      fileUrl: { type: String, default: '' }
     }
   ],
   cprCertification: {
-    name: { type: String },
-    issuer: { type: String },
-    expiryDate: { type: String },
-    fileName: { type: String },
-    fileUrl: { type: String }
+    name: { type: String, default: 'CPR/AED Certification' },
+    issuer: { type: String, default: '' },
+    expiryDate: { type: String, default: '' },
+    fileName: { type: String, default: '' },
+    fileUrl: { type: String, default: '' }
   },
   firstAidCertification: {
-    name: { type: String },
-    issuer: { type: String },
-    expiryDate: { type: String },
-    fileName: { type: String },
-    fileUrl: { type: String }
+    name: { type: String, default: 'First Aid Certification' },
+    issuer: { type: String, default: '' },
+    expiryDate: { type: String, default: '' },
+    fileName: { type: String, default: '' },
+    fileUrl: { type: String, default: '' }
+  },
+  experienceWaiver: {
+    isAgreed: { type: Boolean, default: false },
+    agreedAt: { type: Date }
   },
   backgroundCheck: {
-    idType: { type: String },
-    idNumber: { type: String },
-    documentName: { type: String },
-    documentUrl: { type: String },
-    issuer: { type: String },
-    isConsentConfirmed: { type: Boolean },
-    status: { type: String, enum: ['pending', 'cleared', 'rejected'] }
+    idType: { type: String, default: '' },
+    idNumber: { type: String, default: '' },
+    documentName: { type: String, default: '' },
+    documentUrl: { type: String, default: '' },
+    issuer: { type: String, default: '' },
+    isConsentConfirmed: { type: Boolean, default: false },
+    submittedAt: { type: Date },
+    status: { type: String, enum: ['pending', 'cleared', 'rejected', 'not_submitted'], default: 'not_submitted' }
   },
   isVerified: {
     type: Boolean,
-    default: true,
+    default: false,
   },
   lessonsTaught: {
     type: Number,

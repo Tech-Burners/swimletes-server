@@ -66,20 +66,29 @@ module.exports = function (UPLOADS_FOLDER) {
         "text/plain"
       ];
 
-      if (/image/i.test(field)) {
+      const allAllowedTypes = [
+        ...imageTypes,
+        ...docTypes
+      ];
+
+      if (/image|avatar|photo|profile/i.test(field)) {
         if (imageTypes.includes(file.mimetype)) cb(null, true);
-        else cb(new Error("Only image formats are allowed!"));
+        else cb(new Error("Only image formats (JPEG, PNG, WEBP, HEIC) are allowed for profile photo!"));
       } else if (/video/i.test(field)) {
         if (videoTypes.includes(file.mimetype)) cb(null, true);
         else cb(new Error("Only video formats are allowed!"));
       } else if (/audio|voice/i.test(field)) {
         if (audioTypes.includes(file.mimetype)) cb(null, true);
         else cb(new Error("Only audio/voice formats are allowed!"));
-      } else if (/doc|file/i.test(field)) {
-        if (docTypes.includes(file.mimetype)) cb(null, true);
-        else cb(new Error("Only document formats are allowed!"));
+      } else if (/doc|file|certificate|cert|proof|license|cpr|firstaid|identity|waiver|background/i.test(field)) {
+        if (allAllowedTypes.includes(file.mimetype)) cb(null, true);
+        else cb(new Error("Only document (PDF, DOCX) and image formats (JPEG, PNG, WEBP) are allowed!"));
       } else {
-        cb(null, true); // accept other fields optionally
+        if (allAllowedTypes.includes(file.mimetype) || videoTypes.includes(file.mimetype) || audioTypes.includes(file.mimetype)) {
+          cb(null, true);
+        } else {
+          cb(null, true);
+        }
       }
     },
   });

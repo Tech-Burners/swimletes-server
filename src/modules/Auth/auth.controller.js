@@ -3,22 +3,28 @@ const { tokenGenerator, refreshTokenGenerator, resetTokenGenerator } = require("
 const catchAsync = require("../../helpers/catchAsync");
 const response = require("../../helpers/response");
 const { sendOTP, verifyOTP, checkOTPService } = require("../Otp/otp.service");
-const { login, getUserByEmail, addUser, updateUserById,
-   profileByIdService, getUserById, getUserByPhoneNumber,
+const {
+  login,
+  getUserByEmail,
+  addUser,
+  updateUserById,
+  updateInstructorDocumentsService,
+  createUserOnProfileSetupService,
+  createInstructorOnDocumentSubmissionService,
+  myDocumentsService,
+  profileByIdService,
+  getUserById,
+  getUserByPhoneNumber,
   allUserService,
   deleteAccountService,
   socialLoginWithAppleService,
   socialLoginWithGoogleService,
-  changePasswordService } = require("./auth.service");
+  changePasswordService
+} = require("./auth.service");
 const { default: status } = require("http-status");
 const ApiError = require("../../helpers/ApiError");
 const unlinkImage = require('../../helpers/unlinkImage');
 const userModel = require("../User/user.model");
-
-
-
-
-
 
 const socialLoginWithAppleController = catchAsync(async (req, res) => {
   const result = await socialLoginWithAppleService(req.body);
@@ -26,13 +32,12 @@ const socialLoginWithAppleController = catchAsync(async (req, res) => {
 
   return res.status(status.OK).json(response({
     status: 'success',
-    statusCode: status.OK, message: "User created successfully",
-    data: result, accessToken
+    statusCode: status.OK,
+    message: "Login successful",
+    data: result,
+    accessToken
   }));
 });
-
-
-
 
 const socialLoginWithGoogleController = catchAsync(async (req, res) => {
   const result = await socialLoginWithGoogleService(req.body);
@@ -40,12 +45,12 @@ const socialLoginWithGoogleController = catchAsync(async (req, res) => {
 
   return res.status(status.OK).json(response({
     status: 'success',
-    statusCode: status.OK, message: "User created successfully",
-    data: result, accessToken
+    statusCode: status.OK,
+    message: "Login successful",
+    data: result,
+    accessToken
   }));
 });
-
-
 
 // Login
 const localAuth = catchAsync(async (req, res) => {
@@ -74,7 +79,6 @@ const localAuth = catchAsync(async (req, res) => {
       "email",
       password
     );
-    // console.log("user1", user);
   } else {
     if (!number || !countryCode) {
       throw new ApiError(
@@ -99,86 +103,68 @@ const localAuth = catchAsync(async (req, res) => {
     status: "OK",
     statusCode: status.OK,
     message: "Login successful",
-    data:{
-      userName : user.fullName,
+    data: {
+      _id: user._id,
+      fullName: user.fullName,
+      email: user.email,
       role: user.role,
+      status: user.status,
+      isVerified: user.isVerified,
       image: user.image
-            
     },
     accessToken: token
   }));
 });
 
-
-//Sign up
+// Sign up (Step 1 & 2: Role selection + email credentials)
 const signUp = catchAsync(async (req, res) => {
+  const { email, password, confirmPassword, role = 'user', fullName } = req.body;
 
-  const { email, role, fullName } = req.body;
-
-  if (!role) {
-    throw new ApiError(status.BAD_REQUEST, "Role is required!");
+  if (!role || !['user', 'instructor', 'admin'].includes(role)) {
+    throw new ApiError(status.BAD_REQUEST, "Valid role ('user' or 'instructor') is required!");
   }
-
-  /* ---------- FILE HANDLE FIX ---------- */
-
-  if (req.files) {
-
-    if (req.files.image?.[0]) {
-      req.body.image = req.files.image[0].filename;
-    }
-
-    // if (req.files.certificate?.[0]) {
-    //   req.body.certificate = req.files.certificate[0].filename;
-    // }
-
-    // if (req.files.identityProof?.[0]) {
-    //   req.body.identityProof = req.files.identityProof[0].filename;
-    // }
-
-    // if (req.files.businessCertification?.[0]) {
-    //   req.body.businessCertification = req.files.businessCertification[0].filename;
-    // }
-
-    // if (req.files.bankStatement?.[0]) {
-    //   req.body.bankStatement = req.files.bankStatement[0].filename;
-    // }
-  }
-
-  let sentTo;
-  let receiverType;
-  let existingOTP;
 
   if (!email) {
     throw new ApiError(status.BAD_REQUEST, "Email is required!");
   }
 
-  const existingUser = await getUserByEmail(email);
-
-  if (existingUser) {
-    throw new ApiError(status.CONFLICT, "This email already used!");
+  if (!password) {
+    throw new ApiError(status.BAD_REQUEST, "Password is required!");
   }
 
-  sentTo = email;
-  receiverType = "email";
-  existingOTP = await checkOTPService(email, "email");
+  if (confirmPassword && password !== confirmPassword) {
+    throw new ApiError(status.BAD_REQUEST, "Password and Confirm Password do not match!");
+  }
+
+  const existingUser = await getUserByEmail(email);
+  if (existingUser) {
+    throw new ApiError(status.CONFLICT, "This email is already in use!");
+  }
 
   let message = "";
+  const existingOTP = await checkOTPService(email, "email");
 
   if (existingOTP) {
-    message = "OTP already sent. Please wait for a few minutes.";
+    message = "OTP already sent. Please check your email or wait for a few minutes to resend.";
   } else {
     const otpData = await sendOTP(
-      fullName,
-      sentTo,
-      receiverType,
+      fullName || (role === 'instructor' ? 'Instructor' : 'User'),
+      email,
+      "email",
       "email-verification"
     );
-
-    message = otpData.message;
+    message = otpData.message || "OTP sent to your email";
   }
 
+  const signupPayload = {
+    email: email.toLowerCase().trim(),
+    password,
+    role,
+    ...(fullName && { fullName })
+  };
+
   const accessToken = jwt.sign(
-    { ...req.body },
+    signupPayload,
     process.env.JWT_ACCESS_TOKEN,
     { expiresIn: "1h" }
   );
@@ -194,193 +180,144 @@ const signUp = catchAsync(async (req, res) => {
   );
 });
 
-
-
-
-const updateDocuments = catchAsync(async (req, res) => {
-  if (req.files) {
-    if (req.files.image?.[0]) {
-      req.body.image = req.files.image[0].filename;
-    }
-
-    if (req.files.certificate?.[0]) {
-      req.body.certificate = req.files.certificate[0].filename;
-    }
-
-    if (req.files.identityProof?.[0]) {
-      req.body.identityProof = req.files.identityProof[0].filename;
-    }
-
-    if (req.files.businessCertification?.[0]) {
-      req.body.businessCertification = req.files.businessCertification[0].filename;
-    }
-
-    if (req.files.bankStatement?.[0]) {
-      req.body.bankStatement = req.files.bankStatement[0].filename;
-    }
-  }
-  const result = await updateDocumentsService(req.User._id, req.body);
-  return res.status(status.OK).json(response({
-    status: 'OK', statusCode: status.OK,
-    type: 'user', message: 'documents updated successfully'
-  }));
-});
-
-
-
-
-const allUserController = catchAsync(async (req, res) => {
-  const options = {
-    page: Number(req.query.page) || 1,
-    limit: Number(req.query.limit) || 10,
-    search: req.query.search || "",
-    isBan: req.query.isBan,
-    role: req.query.role
-  }
-  const result = await allUserService(options);
-  return res.status(status.OK).json(
-    response({
-      status: "success",
-      statusCode: status.OK,
-      type: "user",
-      message: "all user fetched successfully",
-      data: result
-    })
-  );
-});
-
-
-// Validate OTP
+// Validate OTP (Step 3: Verification)
 const otpVerification = catchAsync(async (req, res) => {
+  console.log("req.User", req.User);
   const email = req.User?.email || req.body.email;
+  const purpose = req.body.purpose || req.User?.purpose || "email-verification";
 
-  let otpData;
-
-  if (email) {
-    otpData = await verifyOTP(
-      email,
-      "email",
-      req.body.purpose,
-      req.body.otp
-    );
+  if (!email) {
+    throw new ApiError(status.BAD_REQUEST, "Email is required for verification");
   }
 
-  if (otpData && otpData.purpose === "email-verification") {
-    const registeredUser = await addUser(req.User);
-
-    const accessToken = await tokenGenerator(registeredUser);
-
-    return res.status(status.CREATED).json(
-      response({
-        status: "OK",
-        statusCode: status.CREATED,
-        type: "user",
-        message: "Verified",
-        data: registeredUser,
-        accessToken,
-      })
-    );
+  if (!req.body.otp) {
+    throw new ApiError(status.BAD_REQUEST, "OTP code is required");
   }
 
-  if (otpData && otpData.purpose === "forget-password") {
-    let user;
+  const otpData = await verifyOTP(
+    email,
+    "email",
+    purpose,
+    req.body.otp
+  );
 
-    if (email) {
-      user = await getUserByEmail(email);
-    }
+  if (otpData && (purpose === "email-verification" || otpData.purpose === "email-verification")) {
+    const role = req.body.role || req.User?.role || 'user';
+    const password = req.body.password || req.User?.password;
+    const fullName = req.body.fullName || req.User?.fullName || '';
 
-    if (fullPhoneNumber) {
-      user = await userModel.findOne({
-        number,
-        countryCode,
-      });
-    }
+    const verifiedPayload = {
+      email: email.toLowerCase().trim(),
+      role,
+      ...(password && { password }),
+      ...(fullName && { fullName }),
+      isOtpVerified: true,
+      purpose: 'onboarding'
+    };
 
-    const accessToken = resetTokenGenerator(user);
+    const accessToken = jwt.sign(
+      verifiedPayload,
+      process.env.JWT_ACCESS_TOKEN,
+      { expiresIn: "2h" }
+    );
+
+    const nextStep = role === 'instructor' ? 'setup-profile-then-documents' : 'setup-profile';
 
     return res.status(status.OK).json(
       response({
         status: "OK",
         statusCode: status.OK,
-        message: "OTP verified",
+        type: role,
+        message: "OTP verified successfully. Please complete your profile setup.",
+        data: {
+          email: verifiedPayload.email,
+          role: verifiedPayload.role,
+          fullName: verifiedPayload.fullName,
+          isOtpVerified: true,
+          nextStep
+        },
         accessToken,
       })
     );
   }
-});
 
+  if (otpData && (purpose === "forget-password" || otpData.purpose === "forget-password")) {
+    const user = await getUserByEmail(email);
+    if (!user) {
+      throw new ApiError(status.NOT_FOUND, "User not found");
+    }
 
+    const payload = {
+      email: user.email,
+      role: user.role,
+      _id: user._id,
+      fullName: user.fullName,
+    };
 
+    const resetToken = resetTokenGenerator(payload);
 
-// Forget password
-const forgetPassword = catchAsync(async (req, res) => {
-  const { email, number, countryCode } = req.body;
-
-  const hasEmail = !!email;
-  const hasPhone = !!number || !!countryCode;
-
-  if ((hasEmail && hasPhone) || (!hasEmail && !hasPhone)) {
-    throw new ApiError(
-      status.BAD_REQUEST,
-      "Provide either email OR phone, not both"
+    return res.status(status.OK).json(
+      response({
+        status: "OK",
+        statusCode: status.OK,
+        type: "user",
+        message: "OTP verified successfully. You may now reset your password.",
+        resetToken,
+      })
     );
   }
 
-  let user;
-  let sentTo;
-  let receiverType;
+  throw new ApiError(status.BAD_REQUEST, "Invalid OTP purpose or code");
+});
 
-  if (email) {
-    user = await getUserByEmail(email);
+// Resend OTP
+const resendOTP = catchAsync(async (req, res) => {
+  const { email, receiverType = "email", purpose = "email-verification" } = req.body;
 
-    if (!user) {
-      throw new ApiError(status.NOT_FOUND, "User not found");
-    }
+  if (!email) {
+    throw new ApiError(status.BAD_REQUEST, "Email is required");
+  }
 
-    sentTo = email;
-    receiverType = "email";
-  } else {
-    if (!number || !countryCode) {
-      throw new ApiError(
-        status.BAD_REQUEST,
-        "Country code and phone number are required"
-      );
-    }
+  const otpData = await sendOTP(
+    "User",
+    email,
+    receiverType,
+    purpose
+  );
 
-    user = await getUserByPhoneNumber(number, countryCode);
+  return res.status(status.OK).json(
+    response({
+      status: "OK",
+      statusCode: status.OK,
+      message: otpData.message || "OTP resent successfully",
+    })
+  );
+});
 
-    if (!user) {
-      throw new ApiError(status.NOT_FOUND, "User not found");
-    }
+// Forget Password
+const forgetPassword = catchAsync(async (req, res) => {
+  const { email } = req.body;
 
-    sentTo = `${countryCode}${number}`;
-    receiverType = "phone";
+  if (!email) {
+    throw new ApiError(status.BAD_REQUEST, "Email is required");
+  }
+
+  const user = await getUserByEmail(email);
+  if (!user) {
+    throw new ApiError(status.NOT_FOUND, "No account found with this email");
   }
 
   const otpData = await sendOTP(
     user.fullName,
-    sentTo,
-    receiverType,
+    user.email,
+    "email",
     "forget-password"
   );
-
-  if (!otpData) {
-    throw new ApiError(
-      status.INTERNAL_SERVER_ERROR,
-      "Failed to send OTP. Please try again."
-    );
-  }
-
-  const message =
-    receiverType === "email"
-      ? "OTP sent to your email"
-      : "OTP sent to your phone";
 
   const payload = {
     email: user.email,
     role: user.role,
-    number: user.number,
-    countryCode: user.countryCode,
+    _id: user._id,
     fullName: user.fullName,
   };
 
@@ -392,251 +329,273 @@ const forgetPassword = catchAsync(async (req, res) => {
     response({
       status: "OK",
       statusCode: status.OK,
-      type: "user",
-      message,
-      data: token,
+      message: "Password reset OTP sent to your email",
+      accessToken: token
     })
   );
 });
 
-
+// Reset Password
 const resetPassword = catchAsync(async (req, res) => {
+  const { newPassword, confirmPassword } = req.body;
+  const email = req.User?.email || req.body.email;
 
-  const user = await getUserById(req.ResetUser._id);
-  // console.log({ user });
+  if (!email) {
+    throw new ApiError(status.BAD_REQUEST, "Email is missing");
+  }
 
-  if (!user)
-    throw new ApiError(404, "User not found");
+  if (!newPassword) {
+    throw new ApiError(status.BAD_REQUEST, "New password is required");
+  }
 
-  user.password = req.body.password;
-  user.tokenVersion = user.tokenVersion + 1;
+  if (confirmPassword && newPassword !== confirmPassword) {
+    throw new ApiError(status.BAD_REQUEST, "Passwords do not match");
+  }
 
+  const user = await getUserByEmail(email);
+  if (!user) {
+    throw new ApiError(status.NOT_FOUND, "User not found");
+  }
+
+  user.password = newPassword;
   await user.save();
-
-  return res.status(200).json(
-    response({
-      status: "OK",
-      statusCode: status.OK,
-      type: "user",
-      message: "Password reset successful"
-    }));
-});
-
-
-
-
-const deleteAccountController = catchAsync(async (req, res) => {
-  const result = await deleteAccountService(req.User._id);
-  return res.status(status.OK).json(response({ status: 'OK', statusCode: status.OK, type: 'user', message: 'account deleted successfully', data: result }));
-})
-
-
-const changePassword = catchAsync(async (req, res) => {
-  const { oldPassword, newPassword } = req.body;
-
-  await changePasswordService(
-    req.User._id,
-    oldPassword,
-    newPassword
-  );
 
   return res.status(status.OK).json(
     response({
       status: "OK",
       statusCode: status.OK,
-      type: "user",
+      message: "Password reset successfully. Please login with your new password.",
+    })
+  );
+});
+
+// Change Password
+const changePassword = catchAsync(async (req, res) => {
+  const { oldPassword, newPassword } = req.body;
+  await changePasswordService(req.User._id, oldPassword, newPassword);
+
+  return res.status(status.OK).json(
+    response({
+      status: "OK",
+      statusCode: status.OK,
       message: "Password changed successfully",
     })
   );
 });
 
+// Update Profile (Step 4: Full Name, DOB, Avatar, About, etc.)
+const updateProfile = catchAsync(async (req, res) => {
+  const isExistingUser = req.dbUser || (req.User?._id && await getUserById(req.User._id));
 
-const resendOTP = catchAsync(async (req, res) => {
-  const { email, purpose, phoneNumber } = req.body;
-  let user;
-  if (email) {
-    user = await getUserByEmail(email);
+  // Case A: Existing user in MongoDB updating their profile
+  if (isExistingUser) {
+    const user = isExistingUser;
+    if (req.file) {
+      const { filename } = req.file;
+      if (filename && filename.length > 0) {
+        const defaultPath1 = 'user.png';
+        const defaultPath2 = 'user.jpg';
 
-    const fullName = user?.fullName || "User";
-    const otpData = await sendOTP(fullName, email, "email", purpose);
-    if (otpData) { return res.status(status.OK).json(response({ status: "OK", statusCode: status.OK, type: "user", message: 'otp resent to  email' })); }
+        if (user.image && user.image !== defaultPath1 && user.image !== defaultPath2 && !user.image.includes('default')) {
+          unlinkImage(`uploads/users/${user.image}`);
+        }
+        req.body.image = filename;
+      }
+    }
+
+    const result = await updateUserById(user._id, req.body);
+
+    return res.status(status.OK).json(
+      response({
+        status: 'OK',
+        statusCode: status.OK,
+        type: result.role,
+        message: 'Profile updated successfully',
+        data: result
+      })
+    );
   }
-  if (phoneNumber) {
-    user = await getUserByPhoneNumber(phoneNumber);
 
-    const fullName = user?.fullName || "User";
-    const otpData = await sendOTP(fullName, phoneNumber, "phone", purpose);
-    if (otpData) { return res.status(status.OK).json(response({ status: "OK", statusCode: status.OK, type: "user", message: 'otp resent to phone' })); }
+  // Case B: Onboarding user (not in DB yet)
+  if (!req.User || !req.User.isOtpVerified) {
+    throw new ApiError(status.UNAUTHORIZED, "Please verify OTP before setting up your profile");
   }
 
+  const role = req.body.role || req.User.role || 'user';
+
+  // For Client / User: Profile setup is the FINAL onboarding step -> CREATE ACCOUNT IN DB
+  if (role === 'user') {
+    const createdUser = await createUserOnProfileSetupService(req.User, req.body, req.file);
+    const accessToken = await tokenGenerator(createdUser);
+
+    return res.status(status.CREATED).json(
+      response({
+        status: 'OK',
+        statusCode: status.CREATED,
+        type: 'user',
+        message: 'Profile setup completed and user account created successfully',
+        data: createdUser,
+        accessToken
+      })
+    );
+  }
+
+  // For Instructor: Profile setup is an intermediate step -> SAVE ONBOARDING STATE, WAIT FOR DOCUMENTS
+  if (role === 'instructor') {
+    const profileImage = req.file ? req.file.filename : (req.body.image || req.User?.image || 'user.jpg');
+
+    const instructorOnboardingPayload = {
+      email: (req.User?.email || req.body.email || '').toLowerCase().trim(),
+      ...( (req.User?.password || req.body.password) && { password: req.User?.password || req.body.password } ),
+      role: 'instructor',
+      fullName: req.body.fullName || req.User?.fullName || '',
+      dob: req.body.dob || req.body.dateOfBirth || req.User?.dob || '',
+      dateOfBirth: req.body.dateOfBirth || req.body.dob || req.User?.dateOfBirth || '',
+      about: req.body.about || req.body.bio || req.User?.about || '',
+      bio: req.body.bio || req.body.about || req.User?.bio || '',
+      image: profileImage,
+      instructorType: req.body.instructorType || req.User?.instructorType || 'certified',
+      ...(req.body.address && { address: req.body.address }),
+      ...(req.body.number && { number: req.body.number }),
+      ...(req.body.countryCode && { countryCode: req.body.countryCode }),
+      isProfileSetupDone: true,
+      isOtpVerified: true,
+      purpose: 'onboarding'
+    };
+
+    const onboardingToken = jwt.sign(
+      instructorOnboardingPayload,
+      process.env.JWT_ACCESS_TOKEN,
+      { expiresIn: "2h" }
+    );
+
+    return res.status(status.OK).json(
+      response({
+        status: 'OK',
+        statusCode: status.OK,
+        type: 'instructor',
+        message: 'Instructor profile setup saved. Please submit your certification documents to complete account creation.',
+        data: {
+          fullName: instructorOnboardingPayload.fullName,
+          dob: instructorOnboardingPayload.dob,
+          dateOfBirth: instructorOnboardingPayload.dateOfBirth,
+          about: instructorOnboardingPayload.about,
+          image: instructorOnboardingPayload.image,
+          instructorType: instructorOnboardingPayload.instructorType,
+          nextStep: 'submit-documents'
+        },
+        accessToken: onboardingToken
+      })
+    );
+  }
+
+  throw new ApiError(status.BAD_REQUEST, "Invalid user role for profile setup");
 });
 
+// Instructor Onboarding & Document Uploads (Certificates, Waiver, CPR, First Aid, Background Check)
+const updateDocuments = catchAsync(async (req, res) => {
+  const isExistingInstructor = req.dbUser || (req.User?._id && await getUserById(req.User._id));
 
+  // Case A: Existing instructor in MongoDB updating their documents
+  if (isExistingInstructor) {
+    const result = await updateInstructorDocumentsService(isExistingInstructor._id, req.body, req.files || {});
 
-
-const updateProfile = catchAsync(async (req, res) => {
-  const user = await getUserById(req.User._id);
-  if (!user) throw new ApiError(status.NOT_FOUND, 'user not found');
-
-  if (req.file) {
-    const { filename } = req.file;
-
-    if (filename && filename.length > 0) {
-      const defaultPath1 = 'user.png';
-      const defaultPath2 = 'user.jpg';
-
-      if (user.image && user.image !== defaultPath1 && user.image !== defaultPath2 && !user.image.includes('default')) {
-        unlinkImage(`uploads/users/${user.image}`);
-      }
-
-      req.body.image = filename;
-    }
-  }
-  // console.log("controileer", req.body)
-
-  const result = await updateUserById(user._id, req.body);
-
-  let formattedData;
-
-  //  ROLE BASED RESPONSE
-  if (user.role === 'partner') {
-    formattedData = {
-      businessName: result.partner?.businessName,
-      aboutUs: result.partner?.aboutUs,
-      location: result.user?.location,
-      address: result.user?.address,
-      amenities: result.partner?.amenities,
-      serviceAutoApproved: result.partner?.serviceAutoApproved,
-      // whatsappNumber: result.user.whatsappNumber,
-      number: result.user.number,
-      countryCode: result.user.countryCode,
-      image: result.user.image
-    };
+    return res.status(status.OK).json(
+      response({
+        status: 'OK',
+        statusCode: status.OK,
+        type: 'instructor',
+        message: 'Instructor onboarding documents submitted successfully for verification',
+        data: result
+      })
+    );
   }
 
-  else if (user.role === 'admin') {
-    formattedData = {
-      name: result.user.fullName,
-      image: result.user.image,
-      email: result.user.email
-    };
+  // Case B: Onboarding instructor (not in DB yet) -> CREATE INSTRUCTOR ACCOUNT IN DB
+  if (!req.User || !req.User.isOtpVerified) {
+    throw new ApiError(status.UNAUTHORIZED, "Please verify OTP and complete profile setup before submitting documents");
   }
 
-  else if (user.role === 'hr') {
-    formattedData = {
-      companyName: result.company?.companyName,
-      image: result.user.image,
-      manager: result.company?.contactName,
-      email: result.user.email,
-      number: result.user.number,
-      countryCode: result.user.countryCode
-    };
-  }
+  const createdInstructor = await createInstructorOnDocumentSubmissionService(req.User, req.body, req.files || {});
+  const accessToken = await tokenGenerator(createdInstructor);
 
-  else {
-    formattedData = {
-      name: result.user.fullName,
-      email: result.user.email,
-      image: result.user.image,
-      number: result.user.number,
-      countryCode: result.user.countryCode,
-      address: result.user.address,
-      location: result.user.location
-    };
-  }
+  return res.status(status.CREATED).json(
+    response({
+      status: 'OK',
+      statusCode: status.CREATED,
+      type: 'instructor',
+      message: 'Instructor account created successfully and submitted for verification',
+      data: createdInstructor,
+      accessToken
+    })
+  );
+});
 
+// View My Documents & Verification Status
+const myDocumentsController = catchAsync(async (req, res) => {
+  const document = await myDocumentsService(req.User._id);
   return res.status(status.OK).json(
     response({
       status: 'OK',
       statusCode: status.OK,
       type: 'user',
-      message: 'profile updated successfully',
-      data: formattedData
+      message: 'Documents and verification status fetched successfully',
+      data: document
     })
   );
 });
 
-
-
-
-const myDocumentsController = catchAsync(async (req, res) => {
-  const document = await myDocumentsService(req.User._id);
-  return res.status(status.OK).json(response({ status: 'OK', statusCode: status.OK, type: 'user', message: 'documents fetched successfully', data: document }));
-});
-
-
+// Get My Profile
 const userDetailsByID = catchAsync(async (req, res) => {
-  const result = await profileByIdService(req.User._id);
-  // console.log({ result });
+  const user = await profileByIdService(req.User._id);
 
-  if (!result) {
+  if (!user) {
     throw new ApiError(status.NOT_FOUND, "User not found");
-  }
-
-  let formattedData;
-
-  if (result.user.role === 'partner') {
-    formattedData = {
-      businessName: result.partner?.businessName,
-      aboutUs: result.partner?.aboutUs,
-      location: result.user?.location,
-      address: result.user?.address,
-      amenities: result.partner?.amenities,
-      number: result.user?.number,
-      countryCode: result.user?.countryCode,
-      serviceAutoApproved: result.partner?.serviceAutoApproved,
-      // whatsappNumber: result.user.whatsappNumber,
-      number: result.user.number,
-      countryCode: result.user.countryCode,
-      image: result.user.image,
-      isVerified: result.user.isVerified
-    };
-  }
-
-  else if (result.user.role === 'admin') {
-    formattedData = {
-      name: result.user.fullName,
-      image: result.user.image,
-      email: result.user.email
-    };
-  }
-
-  else if (result.user.role === 'hr') {
-    formattedData = {
-      companyName: result.company?.companyName,
-      image: result.user.image,
-      manager: result.company?.contactName,
-      email: result.user.email,
-      number: result.user.number,
-      countryCode: result.user.countryCode
-    };
-  }
-
-  else {
-    formattedData = {
-      name: result.user.fullName,
-      email: result.user.email,
-      image: result.user.image,
-      number: result.user.number,
-      countryCode: result.user.countryCode,
-      address: result.user.address,
-      location: result.user.location
-    };
   }
 
   return res.status(status.OK).json(
     response({
       statusCode: status.OK,
-      message: "User details",
+      message: "User details retrieved successfully",
       type: "user",
-      data: formattedData,
+      data: user,
       status: "OK"
     })
   );
 });
 
+// Delete Account
+const deleteAccountController = catchAsync(async (req, res) => {
+  await deleteAccountService(req.User._id);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      message: 'Account deleted successfully'
+    })
+  );
+});
 
-
+// All Users (Admin)
+const allUserController = catchAsync(async (req, res) => {
+  const options = {
+    page: Number(req.query.page) || 1,
+    limit: Number(req.query.limit) || 10,
+    search: req.query.search || "",
+    isBan: req.query.isBan,
+    role: req.query.role
+  };
+  const result = await allUserService(options);
+  return res.status(status.OK).json(
+    response({
+      status: "success",
+      statusCode: status.OK,
+      type: "user",
+      message: "All users fetched successfully",
+      data: result
+    })
+  );
+});
 
 module.exports = {
   localAuth,

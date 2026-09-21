@@ -44,12 +44,22 @@ const convertHeicToPng = (UPLOADS_FOLDER) => {
     // Convert each HEIC file in req.files if present
     if (req.files) {
       try {
-        for (const field in req.files) {
-          if (Array.isArray(req.files[field])) {
-            for (const file of req.files[field]) {
-              if (file.mimetype === 'image/heic' || file.mimetype === 'image/heif') {
-                await convertHeicFileToPng(file, UPLOADS_FOLDER);
+        if (Array.isArray(req.files)) {
+          for (const file of req.files) {
+            if (file.mimetype === 'image/heic' || file.mimetype === 'image/heif') {
+              await convertHeicFileToPng(file, UPLOADS_FOLDER);
+            }
+          }
+        } else {
+          for (const field in req.files) {
+            if (Array.isArray(req.files[field])) {
+              for (const file of req.files[field]) {
+                if (file.mimetype === 'image/heic' || file.mimetype === 'image/heif') {
+                  await convertHeicFileToPng(file, UPLOADS_FOLDER);
+                }
               }
+            } else if (req.files[field] && (req.files[field].mimetype === 'image/heic' || req.files[field].mimetype === 'image/heif')) {
+              await convertHeicFileToPng(req.files[field], UPLOADS_FOLDER);
             }
           }
         }

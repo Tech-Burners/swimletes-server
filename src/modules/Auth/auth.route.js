@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { tokenCheck, auth, resetTokenCheck } = require("../../middlewares/auth");
+const { tokenCheck, auth, authOrOnboarding, resetTokenCheck } = require("../../middlewares/auth");
 
 const userFileUploadMiddleware = require("../../middlewares/fileUpload");
 const UPLOADS_FOLDER_USERS = "./public/uploads/users";
@@ -20,53 +20,82 @@ const {
   signUp,
   deleteAccountController,
   updateDocuments,
+  myDocumentsController,
   socialLoginWithAppleController,
   socialLoginWithGoogleController
 } = require("./auth.controller");
+
 ensureUploadFolderExists(UPLOADS_FOLDER_USERS);
 
-
-
+// 1. Authentication
 router.post("/signin", localAuth);
 router.post("/google-login", socialLoginWithGoogleController);
 router.post("/apple-login", socialLoginWithAppleController);
-router.get('/my-profile', auth(['user','instructor','admin']), userDetailsByID);
-router.post(
-  "/sign-up",
-  uploadUsers.fields([
-    { name: "image", maxCount: 1 },
-  ]),
-  
+
+// 2. Sign Up & OTP Verification (User & Instructor)
+router.post("/sign-up", signUp);
+router.post("/verify-otp", tokenCheck, otpVerification);
+router.post("/resend-otp", resendOTP);
+
+// 3. Password Management
+router.post("/forget-password", forgetPassword);
+router.post("/reset-password", resetTokenCheck, resetPassword);
+router.patch("/change-password", auth(['user', 'instructor', 'admin']), changePassword);
+
+// 4. Profile Setup & Management (Step 4 for User & Instructor)
+router.get('/my-profile', auth(['user', 'instructor', 'admin']), userDetailsByID);
+router.put(
+  '/update-profile',
+  authOrOnboarding(['user', 'instructor', 'admin']),
+  uploadUsers.single('image'),
   convertHeicToPng(UPLOADS_FOLDER_USERS),
   parseData(),
-  signUp
+  updateProfile
+);
+router.post(
+  '/setup-profile',
+  authOrOnboarding(['user', 'instructor', 'admin']),
+  uploadUsers.single('image'),
+  convertHeicToPng(UPLOADS_FOLDER_USERS),
+  parseData(),
+  updateProfile
 );
 
-
+// 5. Instructor Onboarding & Verification Documents
 router.post(
   "/update-documents",
-  uploadUsers.fields([
-    { name: "image", maxCount: 1 },
-    { name: "certificate", maxCount: 1 },
-    { name: "identityProof", maxCount: 1 },
-    { name: "businessCertification", maxCount: 1 },
-    { name: "bankStatement", maxCount: 1 }
-  ]),
+  authOrOnboarding(['user', 'instructor', 'admin']),
+  uploadUsers.any(),
   convertHeicToPng(UPLOADS_FOLDER_USERS),
-  auth(['user', 'instructor', 'admin']),
+  parseData(),
   updateDocuments
 );
 
+router.post(
+  "/instructor-documents",
+  authOrOnboarding(['user', 'instructor', 'admin']),
+  uploadUsers.any(),
+  convertHeicToPng(UPLOADS_FOLDER_USERS),
+  parseData(),
+  updateDocuments
+);
 
-router.post("/forget-password", forgetPassword);
-router.post("/verify-otp", tokenCheck, otpVerification);
-router.post("/resend-otp", resendOTP);
-router.post("/reset-password", resetTokenCheck, resetPassword);
-router.patch("/change-password", auth(['user','instructor','admin']), changePassword);
-router.patch("/delete-account", auth(['user','instructor','admin']), deleteAccountController);
-router.put('/update-profile', uploadUsers.single('image'),convertHeicToPng(UPLOADS_FOLDER_USERS),
-auth(['user','instructor','admin']), parseData(),updateProfile);
+router.post(
+  "/instructor/onboarding",
+  authOrOnboarding(['user', 'instructor', 'admin']),
+  uploadUsers.any(),
+  convertHeicToPng(UPLOADS_FOLDER_USERS),
+  parseData(),
+  updateDocuments
+);
 
+router.get(
+  "/my-documents",
+  auth(['user', 'instructor', 'admin']),
+  myDocumentsController
+);
 
-module.exports = router
+// 6. Account Deletion
+router.patch("/delete-account", auth(['user', 'instructor', 'admin']), deleteAccountController);
 
+module.exports = router;
