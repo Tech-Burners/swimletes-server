@@ -261,9 +261,11 @@ const otpVerification = catchAsync(async (req, res) => {
       response({
         status: "OK",
         statusCode: status.OK,
-        type: "user",
+        type: user.role,
         message: "OTP verified successfully. You may now reset your password.",
         resetToken,
+        token: resetToken,
+        accessToken: resetToken,
       })
     );
   }
@@ -295,7 +297,7 @@ const resendOTP = catchAsync(async (req, res) => {
   );
 });
 
-// Forget Password
+// Forget Password (Screen 1: Enter email)
 const forgetPassword = catchAsync(async (req, res) => {
   const { email } = req.body;
 
@@ -336,24 +338,26 @@ const forgetPassword = catchAsync(async (req, res) => {
   );
 });
 
-// Reset Password
+// Reset Password (Screen 3: Create New Password)
 const resetPassword = catchAsync(async (req, res) => {
-  const { newPassword, confirmPassword } = req.body;
-  const email = req.User?.email || req.body.email;
+  const newPassword = req.body.password || req.body.newPassword;
+  const confirmPassword = req.body.confirmPassword;
+  const email = req.ResetUser?.email || req.User?.email || req.body.email;
+  const userId = req.ResetUser?._id || req.User?._id;
 
-  if (!email) {
-    throw new ApiError(status.BAD_REQUEST, "Email is missing");
+  if (!email && !userId) {
+    throw new ApiError(status.BAD_REQUEST, "User identification is missing. Please provide reset token.");
   }
 
   if (!newPassword) {
-    throw new ApiError(status.BAD_REQUEST, "New password is required");
+    throw new ApiError(status.BAD_REQUEST, "Password is required");
   }
 
   if (confirmPassword && newPassword !== confirmPassword) {
     throw new ApiError(status.BAD_REQUEST, "Passwords do not match");
   }
 
-  const user = await getUserByEmail(email);
+  const user = userId ? await getUserById(userId) : await getUserByEmail(email);
   if (!user) {
     throw new ApiError(status.NOT_FOUND, "User not found");
   }
