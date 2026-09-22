@@ -36,7 +36,6 @@ const userSchema = new mongoose.Schema({
     min: 0,
   },
   dob: { type: String, default: '' },
-  dateOfBirth: { type: String, default: '' },
   bio: {
     type: String,
     default: '',
@@ -49,9 +48,23 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: '',
   },
-  experienceYears: {
-    type: Number,
-    default: 0,
+  experience: {
+    years: {
+      type: Number,
+      default: 0,
+    },
+    description: {
+      type: String,
+      default: '',
+    },
+    referenceName: {
+      type: String,
+      default: '',
+    },
+    referenceContact: {
+      type: String,
+      default: '',
+    },
   },
   instructorType: {
     type: String,
@@ -62,15 +75,13 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: '',
   },
-  certificationsList: [
-    {
-      name: { type: String, default: '' },
-      issuer: { type: String, default: '' },
-      expiryDate: { type: String, default: '' },
-      fileName: { type: String, default: '' },
-      fileUrl: { type: String, default: '' }
-    }
-  ],
+  certification: {
+    name: { type: String, default: '' },
+    issuer: { type: String, default: '' },
+    expiryDate: { type: String, default: '' },
+    fileName: { type: String, default: '' },
+    fileUrl: { type: String, default: '' }
+  },
   cprCertification: {
     name: { type: String, default: 'CPR/AED Certification' },
     issuer: { type: String, default: '' },

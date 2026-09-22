@@ -298,7 +298,6 @@ const updateUserById = async (id, data) => {
   const userPayload = {
     ...(data.fullName !== undefined && { fullName: data.fullName }),
     ...(data.dob !== undefined && { dob: data.dob }),
-    ...(data.dateOfBirth !== undefined && { dateOfBirth: data.dateOfBirth, dob: data.dateOfBirth }),
     ...(data.image !== undefined && { image: data.image }),
     ...(data.email !== undefined && { email: data.email }),
     ...(data.location !== undefined && { location: data.location }),
@@ -307,10 +306,23 @@ const updateUserById = async (id, data) => {
     ...(data.countryCode !== undefined && { countryCode: data.countryCode }),
     ...(data.bio !== undefined && { bio: data.bio }),
     ...(data.about !== undefined && { about: data.about }),
-    ...(data.experienceYears !== undefined && { experienceYears: Number(data.experienceYears) }),
+    ...((data.experience || data.experienceYears !== undefined || data.experienceDescription || data.referenceName || data.referenceContact) && {
+      experience: {
+        years: data.experience?.years !== undefined ? Number(data.experience.years) : (data.experienceYears !== undefined ? Number(data.experienceYears) : 0),
+        description: data.experience?.description || data.experienceDescription || '',
+        referenceName: data.experience?.referenceName || data.referenceName || '',
+        referenceContact: data.experience?.referenceContact || data.referenceContact || data.referencePhoneOrEmail || ''
+      }
+    }),
     ...(data.instructorType !== undefined && { instructorType: data.instructorType }),
     ...(data.certifications !== undefined && { certifications: data.certifications }),
     ...(data.lessonsTaught !== undefined && { lessonsTaught: Number(data.lessonsTaught) }),
+    ...(data.isWaiverAgreed !== undefined && {
+      experienceWaiver: {
+        isAgreed: data.isWaiverAgreed === true || data.isWaiverAgreed === 'true',
+        agreedAt: (data.isWaiverAgreed === true || data.isWaiverAgreed === 'true') ? new Date() : null
+      }
+    }),
   };
 
   const user = await userModel.findByIdAndUpdate(id, userPayload, { new: true });
@@ -342,7 +354,7 @@ const getUploadedFile = (files, ...fieldNames) => {
 /**
  * Handle instructor onboarding documents submission:
  * - Certifications (for certified instructors)
- * - Additional liability waiver (for experience-based instructors)
+ * - Experience Details & Additional liability waiver (for experience-based instructors)
  * - CPR/AED and First Aid certifications
  * - Background check ID and document verification
  */
@@ -355,9 +367,13 @@ const updateInstructorDocumentsService = async (userId, data, files = {}) => {
   const updateFields = {};
 
   // 1. Instructor Type
-  if (data.instructorType) {
-    updateFields.instructorType = data.instructorType;
+  let instructorType = data.instructorType || user.instructorType || 'certified';
+  if (data.isWaiverAgreed !== undefined || data.experienceYears !== undefined || data.experienceDescription) {
+    if (!data.certificationName && !getUploadedFile(files, 'certificate', 'certificates', 'certification', 'certificateFile', 'certFile', 'cert')) {
+      instructorType = 'experience_based';
+    }
   }
+  updateFields.instructorType = instructorType;
 
   // 2. Profile Photo (if included in onboarding)
   const profileImageFile = getUploadedFile(files, 'image', 'avatar', 'photo', 'profileImage');
@@ -367,20 +383,35 @@ const updateInstructorDocumentsService = async (userId, data, files = {}) => {
 
   // 3. Swim Instruction Certification (Path A: Certified)
   const certFile = getUploadedFile(files, 'certificate', 'certificates', 'certification', 'certificateFile', 'certFile', 'cert');
-  if (data.instructorType === 'certified' || certFile || data.certificationName) {
+  if (instructorType === 'certified' || certFile || data.certificationName) {
     const certItem = {
-      name: data.certificationName || (user.certificationsList?.[0]?.name || 'Water Safety Instructor Certification'),
-      issuer: data.certificationIssuer || (user.certificationsList?.[0]?.issuer || 'American Red Cross'),
-      expiryDate: data.certificationExpiryDate || (user.certificationsList?.[0]?.expiryDate || ''),
-      fileName: certFile?.filename || (user.certificationsList?.[0]?.fileName || ''),
-      fileUrl: certFile ? `/uploads/users/${certFile.filename}` : (user.certificationsList?.[0]?.fileUrl || '')
+      name: data.certificationName || user.certification?.name || (Array.isArray(user.certificationsList) && user.certificationsList[0]?.name) || 'Water Safety Instructor Certification',
+      issuer: data.certificationIssuer || data.issuingBody || data.issuer || user.certification?.issuer || (Array.isArray(user.certificationsList) && user.certificationsList[0]?.issuer) || 'American Red Cross',
+      expiryDate: data.certificationExpiryDate || data.expiryDate || user.certification?.expiryDate || (Array.isArray(user.certificationsList) && user.certificationsList[0]?.expiryDate) || '',
+      fileName: certFile?.filename || user.certification?.fileName || (Array.isArray(user.certificationsList) && user.certificationsList[0]?.fileName) || '',
+      fileUrl: certFile ? `/uploads/users/${certFile.filename}` : (user.certification?.fileUrl || (Array.isArray(user.certificationsList) && user.certificationsList[0]?.fileUrl) || '')
     };
-    updateFields.certificationsList = [certItem];
+    updateFields.certification = certItem;
     updateFields.certifications = certItem.name;
   }
 
-  // 4. Additional Liability Waiver (Path B: Experience-Based)
-  if (data.instructorType === 'experience_based' || data.isWaiverAgreed !== undefined) {
+  // 4. Experience Details (Path B: Experience-Based)
+  const expYears = data.experience?.years !== undefined ? Number(data.experience.years) : (data.experienceYears !== undefined ? Number(data.experienceYears) : (user.experience?.years || 0));
+  const expDesc = data.experience?.description || data.experienceDescription || user.experience?.description || '';
+  const refName = data.experience?.referenceName || data.referenceName || user.experience?.referenceName || '';
+  const refContact = data.experience?.referenceContact || data.referenceContact || data.referencePhoneOrEmail || user.experience?.referenceContact || '';
+
+  if (instructorType === 'experience_based' || data.experience || data.experienceYears !== undefined || data.experienceDescription || data.referenceName || refContact) {
+    updateFields.experience = {
+      years: expYears,
+      description: expDesc,
+      referenceName: refName,
+      referenceContact: refContact
+    };
+  }
+
+  // 5. Additional Liability Waiver (Path B: Experience-Based)
+  if (instructorType === 'experience_based' || data.isWaiverAgreed !== undefined) {
     const isAgreed = data.isWaiverAgreed === true || data.isWaiverAgreed === 'true';
     updateFields.experienceWaiver = {
       isAgreed,
@@ -388,31 +419,31 @@ const updateInstructorDocumentsService = async (userId, data, files = {}) => {
     };
   }
 
-  // 5. CPR / AED Certification
+  // 6. CPR / AED Certification
   const cprFile = getUploadedFile(files, 'cprCertificate', 'cprFile', 'cpr', 'cprCert', 'cprDoc');
   if (cprFile || data.cprName) {
     updateFields.cprCertification = {
       name: data.cprName || 'CPR/AED Certification',
-      issuer: data.cprIssuer || '',
+      issuer: data.cprIssuer || data.cprIssuingBody || '',
       expiryDate: data.cprExpiryDate || '',
       fileName: cprFile ? cprFile.filename : (user.cprCertification?.fileName || ''),
       fileUrl: cprFile ? `/uploads/users/${cprFile.filename}` : (user.cprCertification?.fileUrl || '')
     };
   }
 
-  // 6. First Aid Certification
+  // 7. First Aid Certification
   const firstAidFile = getUploadedFile(files, 'firstAidCertificate', 'firstAidFile', 'firstAid', 'firstaid', 'firstaidCert', 'firstAidDoc');
   if (firstAidFile || data.firstAidName) {
     updateFields.firstAidCertification = {
       name: data.firstAidName || 'First Aid Certification',
-      issuer: data.firstAidIssuer || '',
+      issuer: data.firstAidIssuer || data.firstAidIssuingBody || '',
       expiryDate: data.firstAidExpiryDate || '',
       fileName: firstAidFile ? firstAidFile.filename : (user.firstAidCertification?.fileName || ''),
       fileUrl: firstAidFile ? `/uploads/users/${firstAidFile.filename}` : (user.firstAidCertification?.fileUrl || '')
     };
   }
 
-  // 7. Background Check & ID Document
+  // 8. Background Check & ID Document
   const bgDoc = getUploadedFile(files, 'identityProof', 'backgroundDocument', 'document', 'identityDocument', 'idProof', 'idDocument', 'doc', 'idCard');
   const isConsent = data.isConsentConfirmed === true || data.isConsentConfirmed === 'true';
 
@@ -431,11 +462,10 @@ const updateInstructorDocumentsService = async (userId, data, files = {}) => {
     updateFields.isVerified = false;
   }
 
-  // 8. General profile info if submitted alongside
+  // 9. General profile info if submitted alongside
   if (data.fullName) updateFields.fullName = data.fullName;
-  if (data.dob || data.dateOfBirth) {
-    updateFields.dob = data.dob || data.dateOfBirth;
-    updateFields.dateOfBirth = data.dateOfBirth || data.dob;
+  if (data.dob) {
+    updateFields.dob = data.dob;
   }
   if (data.about) updateFields.about = data.about;
   if (data.bio) updateFields.bio = data.bio;
@@ -468,8 +498,7 @@ const createUserOnProfileSetupService = async (reqUser, data, file) => {
     password,
     role: 'user',
     fullName: data?.fullName || reqUser?.fullName || 'User',
-    dob: data?.dob || data?.dateOfBirth || reqUser?.dob || '',
-    dateOfBirth: data?.dateOfBirth || data?.dob || reqUser?.dateOfBirth || '',
+    dob: data?.dob || reqUser?.dob || '',
     image: file ? file.filename : (data?.image || reqUser?.image || 'user.jpg'),
     status: 'active',
     isVerified: true,
@@ -503,7 +532,13 @@ const createInstructorOnDocumentSubmissionService = async (reqUser, data = {}, f
     throw new ApiError(status.BAD_REQUEST, "Password is required to create an instructor account");
   }
 
-  const instructorType = data?.instructorType || reqUser?.instructorType || 'certified';
+  // Determine instructor type
+  let instructorType = data?.instructorType || reqUser?.instructorType || 'certified';
+  if (data?.isWaiverAgreed !== undefined || reqUser?.isWaiverAgreed !== undefined || data?.experienceYears !== undefined || data?.experienceDescription) {
+    if (!data?.certificationName && !getUploadedFile(files, 'certificate', 'certificates', 'certification', 'certificateFile', 'certFile', 'cert')) {
+      instructorType = 'experience_based';
+    }
+  }
 
   // 1. Profile Photo
   const profileImageFile = getUploadedFile(files, 'image', 'avatar', 'photo', 'profileImage');
@@ -511,50 +546,68 @@ const createInstructorOnDocumentSubmissionService = async (reqUser, data = {}, f
 
   // 2. Swim Instruction Certification (Path A: Certified)
   const certFile = getUploadedFile(files, 'certificate', 'certificates', 'certification', 'certificateFile', 'certFile', 'cert');
-  let certificationsList = [];
+  let certification = {
+    name: '',
+    issuer: '',
+    expiryDate: '',
+    fileName: '',
+    fileUrl: ''
+  };
   let certifications = '';
   if (instructorType === 'certified' || certFile || data?.certificationName) {
-    const certItem = {
+    certification = {
       name: data?.certificationName || 'Water Safety Instructor Certification',
-      issuer: data?.certificationIssuer || 'American Red Cross',
-      expiryDate: data?.certificationExpiryDate || '',
+      issuer: data?.certificationIssuer || data?.issuingBody || data?.issuer || 'American Red Cross',
+      expiryDate: data?.certificationExpiryDate || data?.expiryDate || '',
       fileName: certFile?.filename || '',
       fileUrl: certFile ? `/uploads/users/${certFile.filename}` : ''
     };
-    certificationsList = [certItem];
-    certifications = certItem.name;
+    certifications = certification.name;
   }
 
-  // 3. Additional Liability Waiver (Path B: Experience-Based)
-  const isWaiverAgreed = data?.isWaiverAgreed === true || data?.isWaiverAgreed === 'true' || reqUser?.isWaiverAgreed === true;
+  // 3. Experience Details (Path B: Experience-Based)
+  const expYears = data?.experience?.years !== undefined ? Number(data.experience.years) : (data?.experienceYears !== undefined ? Number(data.experienceYears) : (reqUser?.experience?.years !== undefined ? Number(reqUser.experience.years) : (reqUser?.experienceYears !== undefined ? Number(reqUser.experienceYears) : 0)));
+  const expDesc = data?.experience?.description || data?.experienceDescription || reqUser?.experience?.description || reqUser?.experienceDescription || '';
+  const refName = data?.experience?.referenceName || data?.referenceName || reqUser?.experience?.referenceName || reqUser?.referenceName || '';
+  const refContact = data?.experience?.referenceContact || data?.referenceContact || data?.referencePhoneOrEmail || reqUser?.experience?.referenceContact || reqUser?.referenceContact || reqUser?.referencePhoneOrEmail || '';
+
+  const experience = {
+    years: expYears,
+    description: expDesc,
+    referenceName: refName,
+    referenceContact: refContact
+  };
+
+  // 4. Additional Liability Waiver (Path B: Experience-Based)
+  const isWaiverAgreed = data?.isWaiverAgreed === true || data?.isWaiverAgreed === 'true' || reqUser?.isWaiverAgreed === true || reqUser?.isWaiverAgreed === 'true';
   const experienceWaiver = {
     isAgreed: isWaiverAgreed,
     agreedAt: isWaiverAgreed ? new Date() : null
   };
 
-  // 4. CPR / AED Certification
+  // 5. CPR / AED Certification
   const cprFile = getUploadedFile(files, 'cprCertificate', 'cprFile', 'cpr', 'cprCert', 'cprDoc');
   const cprCertification = {
     name: data?.cprName || 'CPR/AED Certification',
-    issuer: data?.cprIssuer || '',
+    issuer: data?.cprIssuer || data?.cprIssuingBody || '',
     expiryDate: data?.cprExpiryDate || '',
     fileName: cprFile ? cprFile.filename : '',
     fileUrl: cprFile ? `/uploads/users/${cprFile.filename}` : ''
   };
 
-  // 5. First Aid Certification
+  // 6. First Aid Certification
   const firstAidFile = getUploadedFile(files, 'firstAidCertificate', 'firstAidFile', 'firstAid', 'firstaid', 'firstaidCert', 'firstAidDoc');
   const firstAidCertification = {
     name: data?.firstAidName || 'First Aid Certification',
-    issuer: data?.firstAidIssuer || '',
+    issuer: data?.firstAidIssuer || data?.firstAidIssuingBody || '',
     expiryDate: data?.firstAidExpiryDate || '',
     fileName: firstAidFile ? firstAidFile.filename : '',
     fileUrl: firstAidFile ? `/uploads/users/${firstAidFile.filename}` : ''
   };
 
-  // 6. Background Check & ID
+  // 7. Background Check & ID
   const bgDoc = getUploadedFile(files, 'identityProof', 'backgroundDocument', 'document', 'identityDocument', 'idProof', 'idDocument', 'doc', 'idCard');
-  const isConsent = data?.isConsentConfirmed === true || data?.isConsentConfirmed === 'true' || reqUser?.isConsentConfirmed === true;
+  const isConsent = data?.isConsentConfirmed === true || data?.isConsentConfirmed === 'true' || reqUser?.isConsentConfirmed === true || reqUser?.isConsentConfirmed === 'true';
   const backgroundCheck = {
     idType: data?.idType || 'Social Security Number',
     idNumber: data?.idNumber || '',
@@ -571,21 +624,20 @@ const createInstructorOnDocumentSubmissionService = async (reqUser, data = {}, f
     password,
     role: 'instructor',
     fullName: data?.fullName || reqUser?.fullName || 'Instructor',
-    dob: data?.dob || data?.dateOfBirth || reqUser?.dob || '',
-    dateOfBirth: data?.dateOfBirth || data?.dob || reqUser?.dateOfBirth || '',
+    dob: data?.dob || reqUser?.dob || '',
     about: data?.about || data?.bio || reqUser?.about || '',
     bio: data?.bio || data?.about || reqUser?.bio || '',
     image: profileImage,
     instructorType,
     certifications,
-    certificationsList,
+    certification,
+    experience,
     experienceWaiver,
     cprCertification,
     firstAidCertification,
     backgroundCheck,
     status: 'pending',
     isVerified: false,
-    ...(data?.experienceYears !== undefined && { experienceYears: Number(data.experienceYears) }),
     ...(data?.address !== undefined && { address: data.address }),
     ...(data?.number !== undefined && { number: data.number }),
     ...(data?.countryCode !== undefined && { countryCode: data.countryCode }),
@@ -598,7 +650,7 @@ const createInstructorOnDocumentSubmissionService = async (reqUser, data = {}, f
 
 const myDocumentsService = async (userId) => {
   const user = await userModel.findById(userId).select(
-    'fullName email role status isVerified instructorType certifications certificationsList cprCertification firstAidCertification experienceWaiver backgroundCheck'
+    'fullName email role status isVerified instructorType experience certifications certification cprCertification firstAidCertification experienceWaiver backgroundCheck'
   );
   return user;
 };

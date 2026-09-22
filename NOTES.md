@@ -43,21 +43,29 @@
 ### 1. Client / Swimmer (`role: 'user'`)
 1. **Choose Role** (`40012270:15702`): Selects "I am a client" (`role: 'user'`).
 2. **Create Account Credentials** (`40010150:402`): `email`, `password`, `confirmPassword` -> `POST /api/v1/auth/sign-up` -> sends OTP to email, returns signup JWT token. (Account is **NOT** created in DB yet).
-3. **OTP Verification** (`40010647:994`): 6-digit OTP -> `POST /api/v1/auth/verify-otp` -> verifies OTP and returns signed verified onboarding token `isOtpVerified: true`. (Account is **NOT** created in DB yet).
-4. **Profile Setup & Account Creation** (`40012321:1973`): `fullName`, `dob` / `dateOfBirth`, `image` (avatar file) -> `PUT /api/v1/auth/update-profile` or `POST /api/v1/auth/setup-profile` -> **Creates User in MongoDB** with `status: 'active'`, `isVerified: true`, and returns official login `accessToken`.
+3. **OTP Verification** (`40010647:994`): 6-digit OTP -> `POST /api/v1/auth/verify-otp` -> verifies OTP and returns signed verified onboarding token `isOtpVerified: true`, `nextStep: 'setup-profile'`. (Account is **NOT** created in DB yet).
+4. **Profile Setup & Final Account Creation** (`40012321:1973`): `fullName`, `dob` / `dateOfBirth` (mm/dd/yyyy), `image` (avatar file) -> `PUT /api/v1/auth/update-profile` or `POST /api/v1/auth/setup-profile` -> **Creates User in MongoDB** with `status: 'active'`, `isVerified: true`, and returns official login `accessToken`.
 
-### 2. Instructor (`role: 'instructor'`)
+---
+
+### 2. Instructor Dual-Path Onboarding (`role: 'instructor'`)
 1. **Choose Role** (`40012274:18627`): Selects "I am an instructor" (`role: 'instructor'`).
 2. **Create Account Credentials** (`40012321:2378`): `email`, `password`, `confirmPassword` -> `POST /api/v1/auth/sign-up` -> sends OTP to email, returns signup JWT token. (Account is **NOT** created in DB yet).
-3. **OTP Verification** (`40012321:2536`): 6-digit OTP -> `POST /api/v1/auth/verify-otp` -> verifies OTP and returns signed verified onboarding token `isOtpVerified: true`. (Account is **NOT** created in DB yet).
-4. **Profile Setup** (`40012321:2425`): `fullName` (legal name), `dob` (18+), `about` (experience bio), `image` (clear face) -> `PUT /api/v1/auth/update-profile` or `POST /api/v1/auth/setup-profile` -> stores avatar and packages profile data into updated onboarding token (`nextStep: 'submit-documents'`). (Account is **NOT** created in DB yet).
-5. **Certifications, Waiver & Verification Documents (Final Step & Account Creation)**:
-   - **Certification Status** (`40012321:2745` / `40012481:3933`):
-     - **Certified** (`40012471:3628`): `certificationName`, `certificationIssuer`, `certificationExpiryDate`, `certificate` file.
-     - **Experience-Based** (`40012481:4088`): `isWaiverAgreed: true` (Acknowledgment of status & Hold Harmless liability waiver).
-   - **CPR & First Aid** (`40012471:9537` / `40012481:4034`): Required for all instructors (`cprCertificate` & `firstAidCertificate` files).
-   - **Background Check** (`40012477:1623`): `idType` (SSN / Passport / Driver's License / Birth Certificate), `idNumber`, `identityProof` document, `isConsentConfirmed: true`.
-   - **Submission Endpoint**: `POST /api/v1/auth/instructor/onboarding` (or `/update-documents` / `/instructor-documents`) -> **Creates Instructor in MongoDB** with `status: 'pending'`, `isVerified: false`, all documents & profile fields, and returns official login `accessToken`.
+3. **OTP Verification** (`40012321:2536`): 6-digit OTP -> `POST /api/v1/auth/verify-otp` -> verifies OTP and returns signed verified onboarding token `isOtpVerified: true`, `nextStep: 'setup-profile-then-documents'`. (Account is **NOT** created in DB yet).
+4. **Profile Setup** (`40012321:2425`): `fullName` (legal name), `dob` (18+), `about` (teaching experience bio), `image` (face photo required) -> `PUT /api/v1/auth/update-profile` or `POST /api/v1/auth/setup-profile` -> saves avatar and packages profile data into updated onboarding token (`nextStep: 'submit-documents'`). (Account is **NOT** created in DB yet).
+5. **Certification Status Choice** (`40012321:2745` / `40012481:3933`):
+   - **Path A: "Yes, I'm certified" (`instructorType: 'certified'`)**:
+     - **Screen 6: Your Certification** (`40012471:3628`): `certificationName`, `certificationIssuer` / `issuingBody`, `certificationExpiryDate`, `certificate` file.
+     - **Screen 7 & 8: CPR & First Aid** (`40012471:9537`): `cprCertificate` & `firstAidCertificate` files.
+     - **Screen 9: Background Check** (`40012478:1799`): `idType` (SSN / Passport / Driver's License / Birth Certificate), `idNumber`, `identityProof` document, `isConsentConfirmed: true`.
+     - **Submission**: `POST /api/v1/auth/instructor/onboarding` -> **Creates Certified Instructor in MongoDB** with `status: 'pending'`, `isVerified: false`, and returns official login `accessToken`.
+   - **Path B: "No, but I have experience" (`instructorType: 'experience_based'`)**:
+     - **Screen 10: Status Confirmation** (`40012481:3933`): `instructorType: 'experience_based'`.
+     - **Screen 11: Your Experience** (`40012481:3976`): `experienceYears` (number), `experienceDescription` (swimming experience bio), `referenceName` (optional), `referenceContact` (optional phone or email).
+     - **Screen 12: CPR & First Aid** (`40012481:4034`): `cprCertificate` & `firstAidCertificate` files.
+     - **Screen 13: Additional Liability Waiver** (`40012481:4088`): `isWaiverAgreed: true` (Terms acknowledgment & Hold Harmless liability waiver).
+     - **Screen 14 & 15: Background Check** (`40012481:4219`): `idType` (SSN / Passport / Driver's License / Birth Certificate), `idNumber`, `identityProof` document, `isConsentConfirmed: true`.
+     - **Submission**: `POST /api/v1/auth/instructor/onboarding` -> **Creates Experience-Based Instructor in MongoDB** with `status: 'pending'`, `isVerified: false`, all experience details, waiver agreement timestamp, and returns official login `accessToken`.
 
 
 ---

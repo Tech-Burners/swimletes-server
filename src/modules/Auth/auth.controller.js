@@ -118,7 +118,8 @@ const localAuth = catchAsync(async (req, res) => {
 
 // Sign up (Step 1 & 2: Role selection + email credentials)
 const signUp = catchAsync(async (req, res) => {
-  const { email, password, confirmPassword, role = 'user', fullName } = req.body;
+  const { email, password, confirmPassword, role = 'user' } = req.body;
+  const fullName = req.body.fullName || req.body.name || '';
 
   if (!role || !['user', 'instructor', 'admin'].includes(role)) {
     throw new ApiError(status.BAD_REQUEST, "Valid role ('user' or 'instructor') is required!");
@@ -182,15 +183,15 @@ const signUp = catchAsync(async (req, res) => {
 
 // Validate OTP (Step 3: Verification)
 const otpVerification = catchAsync(async (req, res) => {
-  console.log("req.User", req.User);
   const email = req.User?.email || req.body.email;
   const purpose = req.body.purpose || req.User?.purpose || "email-verification";
+  const otp = req.body.otp || req.body.oneTimeCode;
 
   if (!email) {
     throw new ApiError(status.BAD_REQUEST, "Email is required for verification");
   }
 
-  if (!req.body.otp) {
+  if (!otp) {
     throw new ApiError(status.BAD_REQUEST, "OTP code is required");
   }
 
@@ -198,7 +199,7 @@ const otpVerification = catchAsync(async (req, res) => {
     email,
     "email",
     purpose,
-    req.body.otp
+    otp
   );
 
   if (otpData && (purpose === "email-verification" || otpData.purpose === "email-verification")) {
@@ -444,17 +445,25 @@ const updateProfile = catchAsync(async (req, res) => {
   if (role === 'instructor') {
     const profileImage = req.file ? req.file.filename : (req.body.image || req.User?.image || 'user.jpg');
 
+    const experience = {
+      years: req.body.experience?.years !== undefined ? Number(req.body.experience.years) : (req.body.experienceYears !== undefined ? Number(req.body.experienceYears) : (req.User?.experience?.years || 0)),
+      description: req.body.experience?.description || req.body.experienceDescription || req.User?.experience?.description || '',
+      referenceName: req.body.experience?.referenceName || req.body.referenceName || req.User?.experience?.referenceName || '',
+      referenceContact: req.body.experience?.referenceContact || req.body.referenceContact || req.body.referencePhoneOrEmail || req.User?.experience?.referenceContact || ''
+    };
+
     const instructorOnboardingPayload = {
       email: (req.User?.email || req.body.email || '').toLowerCase().trim(),
       ...( (req.User?.password || req.body.password) && { password: req.User?.password || req.body.password } ),
       role: 'instructor',
       fullName: req.body.fullName || req.User?.fullName || '',
-      dob: req.body.dob || req.body.dateOfBirth || req.User?.dob || '',
-      dateOfBirth: req.body.dateOfBirth || req.body.dob || req.User?.dateOfBirth || '',
+      dob: req.body.dob || req.User?.dob || '',
       about: req.body.about || req.body.bio || req.User?.about || '',
       bio: req.body.bio || req.body.about || req.User?.bio || '',
       image: profileImage,
       instructorType: req.body.instructorType || req.User?.instructorType || 'certified',
+      experience,
+      ...(req.body.isWaiverAgreed !== undefined && { isWaiverAgreed: req.body.isWaiverAgreed }),
       ...(req.body.address && { address: req.body.address }),
       ...(req.body.number && { number: req.body.number }),
       ...(req.body.countryCode && { countryCode: req.body.countryCode }),
@@ -478,10 +487,10 @@ const updateProfile = catchAsync(async (req, res) => {
         data: {
           fullName: instructorOnboardingPayload.fullName,
           dob: instructorOnboardingPayload.dob,
-          dateOfBirth: instructorOnboardingPayload.dateOfBirth,
           about: instructorOnboardingPayload.about,
           image: instructorOnboardingPayload.image,
           instructorType: instructorOnboardingPayload.instructorType,
+          experience: instructorOnboardingPayload.experience,
           nextStep: 'submit-documents'
         },
         accessToken: onboardingToken

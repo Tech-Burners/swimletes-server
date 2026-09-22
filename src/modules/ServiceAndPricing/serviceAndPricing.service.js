@@ -48,7 +48,7 @@ const getInstructorServiceAndPricing = async (instructorId) => {
 
   // 1. Fetch Instructor Profile
   const instructor = await User.findById(instructorObjectId).select(
-    'fullName email number countryCode image role avgRating totalReviews ratingCount bio about address experienceYears certifications isVerified lessonsTaught'
+    'fullName email number countryCode image role avgRating totalReviews ratingCount bio about address experience certifications isVerified lessonsTaught'
   );
 
   if (!instructor || instructor.role !== 'instructor') {
@@ -66,7 +66,7 @@ const getInstructorServiceAndPricing = async (instructorId) => {
       image: instructor.image || 'user.jpg',
       address: instructor.address || 'Oak Lawn, Dallas',
       bio: instructor.bio || instructor.about || 'Head coach of a Dallas high-school swim team. Most of my private work is with kids who are frightened of the water — we go at their pace, and nobody gets dunked. I also coach adult beginners and stroke refinement for triathletes.',
-      experienceYears: instructor.experienceYears || 6,
+      experienceYears: instructor.experience?.years !== undefined ? instructor.experience.years : 6,
       certifications: instructor.certifications || 'Red Cross Water Safety Instructor · CPR/AED current to Mar 2027 · Background check cleared Jan 2026',
       isVerified: instructor.isVerified !== undefined ? instructor.isVerified : true,
       badgeText: 'Checked by SwimLetes',

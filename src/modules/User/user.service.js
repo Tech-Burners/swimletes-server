@@ -1176,9 +1176,9 @@ const getAdminInstructorDetailsService = async (instructorId) => {
   const avatarColor = getAvatarColor(instDoc.fullName || instDoc._id);
 
   // Format certifications only if they exist in DB
-  const primaryCert = instDoc.certificationsList && instDoc.certificationsList.length > 0
+  const primaryCert = instDoc.certification || (instDoc.certificationsList && instDoc.certificationsList.length > 0
     ? instDoc.certificationsList[0]
-    : null;
+    : null);
 
   const certifications = {
     primary: primaryCert && (primaryCert.fileName || primaryCert.name)
@@ -1216,6 +1216,16 @@ const getAdminInstructorDetailsService = async (instructorId) => {
       : null
   };
 
+  // Format experience details for experience-based instructors
+  const experience = {
+    experienceYears: instDoc.experience?.years !== undefined ? instDoc.experience.years : (instDoc.experienceYears || 0),
+    experienceDescription: instDoc.experience?.description || instDoc.experienceDescription || instDoc.about || instDoc.bio || '',
+    referenceName: instDoc.experience?.referenceName || instDoc.referenceName || null,
+    referenceContact: instDoc.experience?.referenceContact || instDoc.referenceContact || null,
+    waiverAgreed: !!instDoc.experienceWaiver?.isAgreed,
+    waiverAgreedAt: instDoc.experienceWaiver?.agreedAt || null
+  };
+
   // Format background check only if present in DB
   const bgCheck = instDoc.backgroundCheck && (instDoc.backgroundCheck.idType || instDoc.backgroundCheck.documentName || instDoc.backgroundCheck.status)
     ? {
@@ -1244,6 +1254,7 @@ const getAdminInstructorDetailsService = async (instructorId) => {
       typeBadge,
       image: instDoc.image || null,
       bio: instDoc.bio || null,
+      about: instDoc.about || null,
       number: instDoc.number || null,
       address: instDoc.address || null
     },
@@ -1255,6 +1266,7 @@ const getAdminInstructorDetailsService = async (instructorId) => {
       cancellations: cancelledCount
     },
     certifications,
+    experience,
     backgroundCheck: bgCheck,
     accountStatus: instStatus,
     canSuspend: instStatus !== 'suspended',
