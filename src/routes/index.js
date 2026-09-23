@@ -9,6 +9,7 @@ const bookingRoutes = require('../modules/Booking/booking.route');
 const reviewRoutes = require('../modules/Review/review.route');
 const favouriteRoutes = require('../modules/Favourite/favourite.route');
 const reportRoutes = require('../modules/Report/report.route');
+const chatRoutes = require('../modules/Chat/chat.route');
 
 const moduleRoutes = [
   {
@@ -18,6 +19,14 @@ const moduleRoutes = [
   {
     path: '/user',
     route: userRoutes
+  },
+  {
+    path: '/chat',
+    route: chatRoutes
+  },
+  {
+    path: '/messages',
+    route: chatRoutes
   },
   {
     path: '/static-contents',

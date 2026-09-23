@@ -1,7 +1,9 @@
 const socketAuthMiddleware = require("./auth");
 const { notificationHandler } = require("./features/socketNotification");
+const { chatSocketHandler } = require("./features/socketChat");
+const bookingModel = require("../modules/Booking/booking.model");
 
-const connectedUsers = new Map();
+const { connectedUsers } = require("./connectedUsers");
 
 const socketIO = (io) => {
   try {
@@ -13,103 +15,49 @@ const socketIO = (io) => {
 
       try {
         userId = socket?.decodedToken?._id;
-        // console.log(`User ID: ${userId} just connected`);
-        // console.log("before connectedUsers map::", connectedUsers);
+        const userFullName = socket?.decodedToken?.fullName || "User";
 
-        if (userId) connectedUsers.set(userId.toString(), socket.id);
+        if (userId) {
+          const uKey = userId.toString();
+          connectedUsers.set(uKey, socket.id);
 
-        io.emit("connectUser", Array.from(connectedUsers.keys()));
-        // console.log("after connectedUsers map::", connectedUsers);
+          // Join user's personal private room
+          socket.join(`user::${uKey}`);
 
-        // Handle sendMessage
-        socket.on("sendMessage", async (data, callback) => {
-          try {
-            const { chatId, text = "", filesData = {} } = data;
+          // Broadcast user online status
+          io.emit("userOnline", {
+            userId: uKey,
+            fullName: userFullName,
+            isOnline: true,
+            timestamp: new Date()
+          });
 
-            const images = filesData.images?.map(f => f.url.replace('/public/', '/')) || [];
-            const docs = filesData.docs?.map(f => ({ url: f.url.replace('/public/', '/'), name: f.name })) || [];
-            const voice = filesData.voice?.[0]?.url.replace('/public/', '/') || '';
+          // Also emit list of all online user IDs
+          io.emit("connectUser", Array.from(connectedUsers.keys()));
+        }
 
-            // Validate required fields
-            if (!chatId || !userId || (!text && images.length === 0 && docs.length === 0 && !voice)) {
-              throw new Error("Missing required fields: chatId, sender, or message content");
-            }
+        // 1. Mount Chat Socket Features (SendMessage, JoinChat, Typing, MarkAsRead, etc.)
+        try {
+          chatSocketHandler(io, socket, connectedUsers);
+        } catch (err) {
+          console.error("Error in chatSocketHandler:", err);
+        }
 
-            // Save message
-            const newMessage = await messageModel.create({
-              chatId,
-              sender: userId,
-              text,
-              images,
-              files: docs,
-              voice
-            });
-
-            // Update chat's lastMessage
-            await chatModel.findByIdAndUpdate(chatId, { lastMessage: newMessage._id });
-
-            // Emit message to all connected clients (or room)
-            io.emit(`get message::${chatId}`, newMessage);
-
-            const chatUsers = await getChatUsers(chatId);
-            // console.log("chatUsers::", chatUsers);
-
-            // Determine chat list preview
-            let lastMessagePreview = "";
-
-            if (newMessage.text) {
-              lastMessagePreview = newMessage.text;
-            } else if (newMessage.images?.length > 0) {
-              lastMessagePreview = "📷 Photo";
-            } else if (newMessage.files?.length > 0) {
-              lastMessagePreview = "📄 Document";
-            } else if (newMessage.voice) {
-              lastMessagePreview = "🎤 Voice message";
-            }
-
-            // Send update to each user in chat
-            for (let uid of chatUsers) {
-              const socketId = connectedUsers.get(uid.toString());
-              if (socketId) {
-                io.to(socketId).emit("chatListUpdate", {
-                  chatId,
-                  lastMessage: lastMessagePreview,
-                  updatedAt: new Date()
-                });
-              }
-            }
-
-            // Success callback
-            callback({
-              status: 200,
-              message: "Message sent successfully",
-              result: newMessage
-            });
-
-          } catch (err) {
-            console.error("Error in sendMessage:", err);
-            callback({
-              status: 500,
-              message: err.message || "Failed to send message",
-              result: null
-            });
-          }
-        });
-
-
-        //map route
+        // 2. Provider Live Location Tracking (for Lesson arrival/status)
         socket.on("providerAddress", async (data, callback) => {
           try {
             const parsedData = typeof data === "string" ? JSON.parse(data) : data;
             const { providerLongitude: long, providerLatitude: lat, bookingId } = parsedData;
 
-            const booking = await bookingById(bookingId);
-            const currentStatus = booking?.status;
+            let currentStatus = null;
+            if (bookingId) {
+              const booking = await bookingModel.findById(bookingId).select('status');
+              currentStatus = booking?.status || null;
+            }
 
-            const newData = { lat, long, currentStatus };
+            const newData = { lat, long, currentStatus, bookingId, timestamp: new Date() };
             io.emit(`providerAddress::${bookingId}`, newData);
 
-            //  Only call callback if it exists
             if (typeof callback === "function") {
               callback({
                 status: 200,
@@ -129,19 +77,29 @@ const socketIO = (io) => {
           }
         });
 
-        // Notification handler
+        // 3. Notification handler
         try {
           notificationHandler(io, socket);
         } catch (err) {
           console.error("Error in notificationHandler:", err);
         }
 
-        // Handle disconnect
+        // 4. Handle Disconnect
         socket.on("disconnect", () => {
           try {
-            console.log(`User ID: ${userId} disconnected`);
-            connectedUsers.delete(userId);
-            io.emit("connectUser", Array.from(connectedUsers.keys()));
+            if (userId) {
+              const uKey = userId.toString();
+              connectedUsers.delete(uKey);
+
+              // Broadcast offline event
+              io.emit("userOffline", {
+                userId: uKey,
+                isOnline: false,
+                lastSeen: new Date()
+              });
+
+              io.emit("connectUser", Array.from(connectedUsers.keys()));
+            }
           } catch (err) {
             console.error("Error on disconnect:", err);
           }
@@ -150,14 +108,14 @@ const socketIO = (io) => {
       } catch (err) {
         console.error("Error during socket connection:", err);
 
-        // Ensure disconnect handling even on connection error
         socket.on("disconnect", () => {
           try {
-            console.log(`User ID: ${userId} disconnected after connection error`);
-            if (userId) connectedUsers.delete(userId);
-            io.emit("connectUser", Array.from(connectedUsers.keys()));
-          } catch (err) {
-            console.error("Error on disconnect after connection error:", err);
+            if (userId) {
+              connectedUsers.delete(userId.toString());
+              io.emit("connectUser", Array.from(connectedUsers.keys()));
+            }
+          } catch (disconnectErr) {
+            console.error("Error on disconnect after connection error:", disconnectErr);
           }
         });
       }
@@ -168,9 +126,7 @@ const socketIO = (io) => {
   }
 };
 
-
 module.exports = {
   socketIO,
   connectedUsers,
 };
-

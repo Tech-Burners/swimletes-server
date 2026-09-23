@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Swimletes - Real-Time Socket.IO Tester</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --green: #22c55e;
+      --red: #ef4444;
+      --bubble-me: #0284c7;
+      --bubble-other: #334155;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 24px; min-height: 100vh; }
+
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; border-bottom: 1px solid var(--border); padding-bottom: 16px; }
+    h1 { font-size: 20px; font-weight: 700; color: var(--primary); }
+    .status-badge { padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; background: var(--border); color: var(--text-muted); }
+    .status-badge.connected { background: rgba(34, 197, 94, 0.2); color: var(--green); border: 1px solid var(--green); }
+
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    label { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; }
+    input, textarea, select { background: #0f172a; border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 10px 12px; font-size: 13px; outline: none; }
+    input:focus, textarea:focus { border-color: var(--primary); }
+
+    .btn { background: var(--primary); color: #000; border: none; border-radius: 8px; padding: 10px 16px; font-weight: 600; font-size: 13px; cursor: pointer; transition: 0.2s; }
+    .btn:hover { background: var(--primary-hover); color: #fff; }
+    .btn-danger { background: var(--red); color: #fff; }
+    .btn-secondary { background: var(--border); color: var(--text); }
+    .btn-secondary:hover { background: #475569; color: #fff; }
+    .btn-row { display: flex; gap: 8px; }
+
+    .chat-box { height: 260px; background: #0b1120; border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+    .msg { max-width: 80%; padding: 8px 12px; border-radius: 8px; font-size: 13px; line-height: 1.4; word-break: break-word; }
+    .msg.me { align-self: flex-end; background: var(--bubble-me); color: #fff; }
+    .msg.other { align-self: flex-start; background: var(--bubble-other); color: var(--text); }
+    .msg-meta { font-size: 10px; opacity: 0.8; margin-top: 4px; display: flex; justify-content: space-between; gap: 8px; }
+    .msg-status { font-weight: bold; }
+
+    .typing-indicator { font-size: 12px; color: var(--primary); font-style: italic; min-height: 18px; padding-left: 4px; transition: opacity 0.2s; }
+
+    .log-box { height: 160px; background: #000; border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-family: monospace; font-size: 11px; overflow-y: auto; color: #a3e635; }
+    .log-line { margin-bottom: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 2px; }
+    .log-line.event { color: var(--primary); }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div>
+      <h1>🏊‍♂️ Swimletes Socket.IO Real-Time Tester</h1>
+      <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Target Socket Server: <strong>http://localhost:3049</strong> (Chat Rooms & Events)</p>
+    </div>
+  </header>
+
+  <div class="grid">
+    <!-- USER 1 -->
+    <div class="card" id="client1">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3>👤 Client 1 (e.g. Coach / User A)</h3>
+        <span class="status-badge" id="c1-status">Disconnected</span>
+      </div>
+
+      <div class="form-group">
+        <label>JWT Access Token</label>
+        <input type="text" id="c1-token" placeholder="Bearer eyJhbGciOiJIUzI1Ni..." />
+      </div>
+
+      <div class="btn-row">
+        <button class="btn" onclick="connectSocket(1)">Connect</button>
+        <button class="btn btn-danger" onclick="disconnectSocket(1)">Disconnect</button>
+      </div>
+
+      <div class="form-group">
+        <label>Room (chatId)</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="c1-chatId" placeholder="e.g. 6a9d3f5dcae1e9d54fac171f" style="flex:1;" />
+          <button class="btn btn-secondary" onclick="joinRoom(1)">Join Room</button>
+          <button class="btn btn-secondary" onclick="markAsRead(1)" title="Mark all messages in this chat as read">Mark Read (✓✓)</button>
+        </div>
+      </div>
+
+      <div class="chat-box" id="c1-messages"></div>
+      <div class="typing-indicator" id="c1-typing-indicator"></div>
+
+      <div class="form-group">
+        <label>Send Message</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="c1-input" placeholder="Type a message (triggers typing indicator)..." style="flex:1;" oninput="handleTyping(1)" />
+          <button class="btn" onclick="sendMsg(1)">Send</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Socket Logs</label>
+        <div class="log-box" id="c1-logs"></div>
+      </div>
+    </div>
+
+    <!-- USER 2 -->
+    <div class="card" id="client2">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3>👤 Client 2 (e.g. Swimmer / User B)</h3>
+        <span class="status-badge" id="c2-status">Disconnected</span>
+      </div>
+
+      <div class="form-group">
+        <label>JWT Access Token</label>
+        <input type="text" id="c2-token" placeholder="Bearer eyJhbGciOiJIUzI1Ni..." />
+      </div>
+
+      <div class="btn-row">
+        <button class="btn" onclick="connectSocket(2)">Connect</button>
+        <button class="btn btn-danger" onclick="disconnectSocket(2)">Disconnect</button>
+      </div>
+
+      <div class="form-group">
+        <label>Room (chatId)</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="c2-chatId" placeholder="e.g. 6a9d3f5dcae1e9d54fac171f" style="flex:1;" />
+          <button class="btn btn-secondary" onclick="joinRoom(2)">Join Room</button>
+          <button class="btn btn-secondary" onclick="markAsRead(2)" title="Mark all messages in this chat as read">Mark Read (✓✓)</button>
+        </div>
+      </div>
+
+      <div class="chat-box" id="c2-messages"></div>
+      <div class="typing-indicator" id="c2-typing-indicator"></div>
+
+      <div class="form-group">
+        <label>Send Message</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="c2-input" placeholder="Type a message (triggers typing indicator)..." style="flex:1;" oninput="handleTyping(2)" />
+          <button class="btn" onclick="sendMsg(2)">Send</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Socket Logs</label>
+        <div class="log-box" id="c2-logs"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const sockets = { 1: null, 2: null };
+    const socketUrl = 'http://localhost:3049';
+
+    function log(clientNum, text, isEvent = false) {
+      const el = document.getElementById(`c${clientNum}-logs`);
+      const time = new Date().toLocaleTimeString();
+      const div = document.createElement('div');
+      div.className = 'log-line' + (isEvent ? ' event' : '');
+      div.textContent = `[${time}] ${text}`;
+      el.appendChild(div);
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function connectSocket(clientNum) {
+      const token = document.getElementById(`c${clientNum}-token`).value.trim();
+      if (!token) {
+        alert('Please enter a JWT Access Token first!');
+        return;
+      }
+
+      log(clientNum, `Connecting to ${socketUrl}...`);
+
+      const socket = io(socketUrl, {
+        auth: { token: token.startsWith('Bearer ') ? token : 'Bearer ' + token },
+        transports: ['websocket', 'polling']
+      });
+
+      sockets[clientNum] = socket;
+
+      socket.on('connect', () => {
+        const badge = document.getElementById(`c${clientNum}-status`);
+        badge.textContent = '🟢 Connected (' + socket.id.substring(0, 8) + '...)';
+        badge.className = 'status-badge connected';
+        log(clientNum, `Connected with socket ID: ${socket.id}`, true);
+      });
+
+      socket.on('connect_error', (err) => {
+        log(clientNum, `Connection error: ${err.message}`);
+      });
+
+      socket.on('disconnect', (reason) => {
+        const badge = document.getElementById(`c${clientNum}-status`);
+        badge.textContent = 'Disconnected';
+        badge.className = 'status-badge';
+        log(clientNum, `Disconnected: ${reason}`);
+      });
+
+      // 1. Listen for new messages
+      socket.on('newMessage', (msg) => {
+        log(clientNum, `📩 newMessage from ${msg.sender?.fullName || 'Other'}: "${msg.text}"`, true);
+        appendMessage(clientNum, msg.text, msg.sender?.fullName || 'Other', false);
+      });
+
+      // 2. Real-Time Typing Indicator (userTyping event)
+      socket.on('userTyping', (data) => {
+        const indicator = document.getElementById(`c${clientNum}-typing-indicator`);
+        if (data.isTyping) {
+          indicator.textContent = `✍️ ${data.fullName || 'User'} is typing...`;
+          log(clientNum, `✍️ ${data.fullName || 'User'} is typing...`, true);
+        } else {
+          indicator.textContent = '';
+        }
+      });
+
+      // 3. Real-Time Read Receipts (messagesRead event)
+      socket.on('messagesRead', (data) => {
+        log(clientNum, `👁️ messagesRead: All messages read in room ${data.chatId}`, true);
+        // Update all sent messages from "✓ Sent" to "✓✓ Read"
+        const statuses = document.querySelectorAll(`#c${clientNum}-messages .msg.me .msg-status`);
+        statuses.forEach(s => {
+          s.textContent = '✓✓ Read';
+          s.style.color = '#38bdf8';
+        });
+      });
+
+      // 4. Chat List / Badge count update
+      socket.on('chatListUpdate', (data) => {
+        log(clientNum, `📬 chatListUpdate: Chat ${data.chatId} unreadCount: ${data.unreadCount}`, true);
+      });
+
+      // 5. Online/Offline events
+      socket.on('userOnline', (data) => {
+        log(clientNum, `🟢 userOnline: ${data.fullName || data.userId}`, true);
+      });
+
+      socket.on('userOffline', (data) => {
+        log(clientNum, `🔴 userOffline: ${data.userId}`, true);
+      });
+    }
+
+    function disconnectSocket(clientNum) {
+      if (sockets[clientNum]) {
+        sockets[clientNum].disconnect();
+        sockets[clientNum] = null;
+      }
+    }
+
+    function joinRoom(clientNum) {
+      const socket = sockets[clientNum];
+      if (!socket || !socket.connected) {
+        alert('Socket not connected!');
+        return;
+      }
+      const chatId = document.getElementById(`c${clientNum}-chatId`).value.trim();
+      if (!chatId) {
+        alert('Enter chatId to join');
+        return;
+      }
+
+      socket.emit('joinChat', { chatId }, (res) => {
+        log(clientNum, `joinChat ack: ` + JSON.stringify(res), true);
+      });
+    }
+
+    function sendMsg(clientNum) {
+      const socket = sockets[clientNum];
+      if (!socket || !socket.connected) {
+        alert('Socket not connected!');
+        return;
+      }
+      const chatId = document.getElementById(`c${clientNum}-chatId`).value.trim();
+      const input = document.getElementById(`c${clientNum}-input`);
+      const text = input.value.trim();
+      if (!text) return;
+
+      const payload = { chatId, text };
+
+      socket.emit('sendMessage', payload, (res) => {
+        log(clientNum, `sendMessage ack: ` + JSON.stringify(res), true);
+        if (res.status === 200 || res.statusCode === 200) {
+          appendMessage(clientNum, text, 'Me', true);
+          input.value = '';
+          // Reset typing indicator immediately
+          socket.emit('typing', { chatId, isTyping: false });
+        } else {
+          alert('Failed to send: ' + (res.message || 'Error'));
+        }
+      });
+    }
+
+    // Real-Time Typing debouncing
+    const typingTimeouts = { 1: null, 2: null };
+    function handleTyping(clientNum) {
+      const socket = sockets[clientNum];
+      const chatId = document.getElementById(`c${clientNum}-chatId`).value.trim();
+      if (!socket || !socket.connected || !chatId) return;
+
+      // Emit typing true
+      socket.emit('typing', { chatId, isTyping: true });
+
+      // Debounce: after 1.5s of no keypress, emit typing false
+      clearTimeout(typingTimeouts[clientNum]);
+      typingTimeouts[clientNum] = setTimeout(() => {
+        socket.emit('typing', { chatId, isTyping: false });
+      }, 1500);
+    }
+
+    // Real-Time Mark As Read
+    function markAsRead(clientNum) {
+      const socket = sockets[clientNum];
+      if (!socket || !socket.connected) {
+        alert('Socket not connected!');
+        return;
+      }
+      const chatId = document.getElementById(`c${clientNum}-chatId`).value.trim();
+      if (!chatId) {
+        alert('Enter chatId to mark as read');
+        return;
+      }
+
+      socket.emit('markAsRead', { chatId }, (res) => {
+        log(clientNum, `markAsRead ack: ` + JSON.stringify(res), true);
+      });
+    }
+
+    function appendMessage(clientNum, text, senderName, isMe) {
+      const box = document.getElementById(`c${clientNum}-messages`);
+      const div = document.createElement('div');
+      div.className = 'msg ' + (isMe ? 'me' : 'other');
+      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      div.innerHTML = `
+        <div>${text}</div>
+        <div class="msg-meta">
+          <span>${senderName} • ${time}</span>
+          ${isMe ? '<span class="msg-status">✓ Sent</span>' : ''}
+        </div>
+      `;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+  </script>
+</body>
+</html>
