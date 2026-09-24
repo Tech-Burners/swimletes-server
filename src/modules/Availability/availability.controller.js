@@ -94,8 +94,8 @@ const toggleDayAvailability = catchAsync(async (req, res) => {
 // Public / Client: Get instructor date-specific slots and 7-day availability view
 const getInstructorSlots = catchAsync(async (req, res) => {
   const { instructorId } = req.params;
-  const { date } = req.query;
-  const result = await getInstructorSlotsService(instructorId, date);
+  const { date, month } = req.query;
+  const result = await getInstructorSlotsService(instructorId, date, month);
   return res.status(status.OK).json(
     response({
       status: 'OK',

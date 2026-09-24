@@ -208,19 +208,54 @@ const createBookingService = async (authUserId, payload) => {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Instructor ID is required');
   }
 
-  const instructor = await User.findById(instructorId);
+  const [clientUser, instructor] = await Promise.all([
+    User.findById(effectiveClientId),
+    User.findById(instructorId)
+  ]);
+
   if (!instructor || instructor.role !== 'instructor') {
     throw new ApiError(httpStatus.NOT_FOUND, 'Instructor not found');
   }
 
+  // 1. Time Slot Conflict Check (Double-Booking Prevention)
+  if (date && startTime) {
+    const bookingDate = parseBookingDate(date);
+    if (bookingDate) {
+      const startOfDay = new Date(bookingDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(bookingDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const existingBooking = await Booking.findOne({
+        instructor: instructorId,
+        date: { $gte: startOfDay, $lte: endOfDay },
+        startTime,
+        status: { $in: ['pending', 'accepted', 'active'] }
+      });
+
+      if (existingBooking) {
+        throw new ApiError(httpStatus.CONFLICT, 'This time slot is already booked. Please choose another time.');
+      }
+    }
+  }
+
+  // 2. Swimmer Details & Auto-fill for 'myself' (Figma Screen 40012135:754)
+  const isMyself = (swimmer?.bookedFor === 'myself') || (!swimmer?.name && !swimmerName);
+  let defaultAge = 0;
+  if (clientUser?.dob) {
+    const birthYear = new Date(clientUser.dob).getFullYear();
+    if (!isNaN(birthYear)) defaultAge = Math.max(1, new Date().getFullYear() - birthYear);
+  }
+
   const swimmerObj = {
-    bookedFor: swimmer?.bookedFor || 'someone_else',
-    name: swimmer?.name || swimmerName || 'Swimmer',
-    age: Number(swimmer?.age !== undefined ? swimmer.age : (swimmerAge || 0)),
+    bookedFor: swimmer?.bookedFor || (isMyself ? 'myself' : 'someone_else'),
+    name: swimmer?.name || swimmerName || (isMyself && clientUser?.fullName ? clientUser.fullName : 'Swimmer'),
+    age: Number(swimmer?.age !== undefined ? swimmer.age : (swimmerAge !== undefined ? swimmerAge : defaultAge)),
     comfortLevel: swimmer?.comfortLevel || comfortLevel || 'nervous_beginner',
     notes: swimmer?.notes || notes || ''
   };
 
+  // 3. Location Details
   const locationObj = {
     locationType: location?.locationType || 'public_pool',
     poolName: location?.poolName || poolName || '',
@@ -229,16 +264,17 @@ const createBookingService = async (authUserId, payload) => {
     travelDistance: Number(location?.travelDistance || 0)
   };
 
+  // 4. Liability Waiver (Figma Screen 40012195:700)
   const waiverObj = {
-    isSigned: true,
-    signerRelationship: waiver?.signerRelationship || 'parent',
-    legalName: waiver?.legalName || legalName || instructor.fullName || 'Parent/Guardian',
-    isAgreed: true,
-    signedDate: new Date(),
+    isSigned: waiver?.isSigned !== undefined ? waiver.isSigned : true,
+    signerRelationship: waiver?.signerRelationship || (isMyself ? 'self' : 'parent'),
+    legalName: waiver?.legalName || legalName || clientUser?.fullName || 'Parent/Guardian',
+    isAgreed: waiver?.isAgreed !== undefined ? waiver.isAgreed : true,
+    signedDate: waiver?.signedDate ? new Date(waiver.signedDate) : new Date(),
     waiverVersion: waiver?.waiverVersion || 'v1.0'
   };
 
-  // Calculate pricing breakdown
+  // Calculate pricing breakdown (Figma Screen 40012199:3518)
   const lessonPrice = Number(pricing?.lessonPrice) || 60;
   const bookingFee = Number(pricing?.bookingFee) || +(lessonPrice * 0.05).toFixed(2);
   const poolEntryFee = Number(pricing?.poolEntryFee) || 0;
@@ -311,11 +347,48 @@ const createBookingService = async (authUserId, payload) => {
   }
 
   const populated = await Booking.findById(booking._id)
-    .populate('client', 'fullName email image')
-    .populate('instructor', 'fullName email image')
+    .populate('client', 'fullName email image number address')
+    .populate('instructor', 'fullName email image number bio address certifications avgRating totalReviews')
     .populate('chat');
 
-  return formatUserBookingCard(populated);
+  // Format full Confirmation Payload matching Figma Screen 40012199:3699
+  const baseCard = formatUserBookingCard(populated);
+  const bDate = parseBookingDate(populated.date);
+  const daysShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  let cancellationDeadline = '';
+  let formattedFullDate = '';
+  if (bDate && !isNaN(bDate.getTime())) {
+    formattedFullDate = `${daysShort[bDate.getDay()]}, ${monthsShort[bDate.getMonth()]} ${bDate.getDate()}, ${bDate.getFullYear()}`;
+    const deadlineDate = new Date(bDate);
+    deadlineDate.setDate(deadlineDate.getDate() - 1);
+    cancellationDeadline = `Free to change or cancel until ${daysShort[deadlineDate.getDay()]}, ${monthsShort[deadlineDate.getMonth()]} ${deadlineDate.getDate()} at ${populated.startTime || '10:00 AM'}.`;
+  }
+
+  return {
+    ...baseCard,
+    bookingId: populated.bookingId,
+    formattedFullDate,
+    timeRange: `${populated.startTime || ''} – ${populated.endTime || ''}`,
+    startTime: populated.startTime,
+    endTime: populated.endTime,
+    duration: populated.duration,
+    lessonType: populated.lessonType,
+    swimmer: populated.swimmer,
+    location: populated.location,
+    pricing: populated.pricing,
+    cancellationNotice: cancellationDeadline,
+    chatId: populated.chat?._id || populated.chat || null,
+    canChat: true,
+    calendarEvent: {
+      title: `${populated.lessonType} with ${populated.instructor?.fullName || 'Instructor'}`,
+      startDate: populated.date,
+      startTime: populated.startTime,
+      endTime: populated.endTime,
+      location: populated.location?.poolName ? `${populated.location.poolName}, ${populated.location.address}` : populated.location?.address
+    }
+  };
 };
 
 /**

@@ -87,9 +87,9 @@ const toggleDayService = async (instructorId, day, isAvailable) => {
 };
 
 /**
- * Get instructor date-specific slots and 7-day availability view (matching Figma Availability tab)
+ * Get instructor date-specific slots, 7-day availability strip, and full month calendar (matching Figma Screens 40012130:6834 & 40012146:718)
  */
-const getInstructorSlotsService = async (instructorId, queryDate) => {
+const getInstructorSlotsService = async (instructorId, queryDate, queryMonth) => {
   const Booking = require('../Booking/booking.model');
   const availability = await getAvailabilityByInstructorId(instructorId);
 
@@ -106,7 +106,7 @@ const getInstructorSlotsService = async (instructorId, queryDate) => {
     (item) => item.day.toLowerCase() === selectedDayName.toLowerCase()
   );
 
-  // 1. Fetch bookings for selected date
+  // 1. Fetch bookings for selected date to compute isBooked per slot
   const startOfDay = new Date(targetDate);
   startOfDay.setHours(0, 0, 0, 0);
   const endOfDay = new Date(targetDate);
@@ -115,12 +115,12 @@ const getInstructorSlotsService = async (instructorId, queryDate) => {
   const existingBookings = await Booking.find({
     instructor: instructorId,
     date: { $gte: startOfDay, $lte: endOfDay },
-    status: { $in: ['pending', 'accepted', 'active', 'completed'] }
+    status: { $in: ['pending', 'accepted', 'active'] }
   });
 
   const bookedStartTimes = new Set(existingBookings.map((b) => b.startTime));
 
-  // 2. Mark slots with isBooked
+  // 2. Mark individual slots with isBooked
   const slots = (daySchedule?.slots || []).map((slot) => {
     const isBooked = bookedStartTimes.has(slot.startTime);
     return {
@@ -131,7 +131,19 @@ const getInstructorSlotsService = async (instructorId, queryDate) => {
     };
   });
 
-  // 3. Build 7-day calendar strip
+  // 3. Build 7-day calendar strip with accurate booked slot subtraction (Figma Screen 40012130:6834)
+  const stripStart = new Date(targetDate);
+  stripStart.setHours(0, 0, 0, 0);
+  const stripEnd = new Date(targetDate);
+  stripEnd.setDate(stripEnd.getDate() + 7);
+  stripEnd.setHours(23, 59, 59, 999);
+
+  const stripBookings = await Booking.find({
+    instructor: instructorId,
+    date: { $gte: stripStart, $lte: stripEnd },
+    status: { $in: ['pending', 'accepted', 'active'] }
+  });
+
   const calendarWeek = [];
   for (let i = 0; i < 7; i++) {
     const d = new Date(targetDate);
@@ -142,23 +154,103 @@ const getInstructorSlotsService = async (instructorId, queryDate) => {
       (item) => item.day.toLowerCase() === dDayName.toLowerCase()
     );
 
-    const isDayAvail = dDaySchedule?.isAvailable && (dDaySchedule.slots?.length || 0) > 0;
+    const isDayEnabled = dDaySchedule?.isAvailable && (dDaySchedule.slots?.length || 0) > 0;
     const totalDaySlots = dDaySchedule?.slots?.length || 0;
 
+    // Filter bookings on this specific day
+    const dDateStr = d.toISOString().split('T')[0];
+    const bookingsOnDate = stripBookings.filter((b) => {
+      const bDateStr = b.date ? new Date(b.date).toISOString().split('T')[0] : '';
+      return bDateStr === dDateStr;
+    });
+
+    const bookedSlotsCount = bookingsOnDate.length;
+    const remainingOpenSlots = Math.max(0, totalDaySlots - bookedSlotsCount);
+
+    let status = 'closed';
     let statusText = 'closed';
-    if (isDayAvail) {
-      statusText = `${totalDaySlots} open`;
+
+    if (!isDayEnabled || totalDaySlots === 0) {
+      status = 'pool_closed';
+      statusText = 'closed';
+    } else if (remainingOpenSlots === 0) {
+      status = 'fully_booked';
+      statusText = 'full';
+    } else {
+      status = 'open';
+      statusText = `${remainingOpenSlots} open`;
     }
 
     calendarWeek.push({
-      date: d.toISOString().split('T')[0],
+      date: dDateStr,
       dayName: dDayName,
       dayShort: dDayShort,
       dayNumber: d.getDate(),
-      isAvailable: isDayAvail,
+      isAvailable: isDayEnabled && remainingOpenSlots > 0,
       totalSlots: totalDaySlots,
-      statusText: statusText
+      openSlots: remainingOpenSlots,
+      status,
+      statusText
     });
+  }
+
+  // 4. Monthly Calendar Grid (Figma Screen 40012146:718)
+  let calendarMonth = null;
+  const targetMonthStr = queryMonth || (queryDate ? queryDate.substring(0, 7) : null);
+  if (targetMonthStr && targetMonthStr.match(/^\d{4}-\d{2}$/)) {
+    const [year, month] = targetMonthStr.split('-').map(Number);
+    const monthStart = new Date(year, month - 1, 1, 0, 0, 0, 0);
+    const monthEnd = new Date(year, month, 0, 23, 59, 59, 999);
+    const totalDaysInMonth = monthEnd.getDate();
+
+    const monthBookings = await Booking.find({
+      instructor: instructorId,
+      date: { $gte: monthStart, $lte: monthEnd },
+      status: { $in: ['pending', 'accepted', 'active'] }
+    });
+
+    calendarMonth = [];
+    const selectedDateStr = targetDate.toISOString().split('T')[0];
+
+    for (let dayNum = 1; dayNum <= totalDaysInMonth; dayNum++) {
+      const d = new Date(year, month - 1, dayNum);
+      const dDateStr = d.toISOString().split('T')[0];
+      const dDayName = daysOfWeek[d.getDay()];
+      const dDayShort = dayShortNames[d.getDay()];
+      const dDaySchedule = availability.weeklySchedule.find(
+        (item) => item.day.toLowerCase() === dDayName.toLowerCase()
+      );
+
+      const isDayEnabled = dDaySchedule?.isAvailable && (dDaySchedule.slots?.length || 0) > 0;
+      const totalDaySlots = dDaySchedule?.slots?.length || 0;
+
+      const bookingsOnDay = monthBookings.filter((b) => {
+        const bDateStr = b.date ? new Date(b.date).toISOString().split('T')[0] : '';
+        return bDateStr === dDateStr;
+      });
+
+      const remainingSlots = Math.max(0, totalDaySlots - bookingsOnDay.length);
+      let dayState = 'open'; // 'chosen', 'open', 'fully_booked', 'pool_closed'
+
+      if (dDateStr === selectedDateStr) {
+        dayState = 'chosen';
+      } else if (!isDayEnabled || totalDaySlots === 0) {
+        dayState = 'pool_closed';
+      } else if (remainingSlots === 0) {
+        dayState = 'fully_booked';
+      } else {
+        dayState = 'open';
+      }
+
+      calendarMonth.push({
+        date: dDateStr,
+        dayNumber: dayNum,
+        dayShort: dDayShort,
+        status: dayState,
+        isOpen: isDayEnabled && remainingSlots > 0,
+        openSlots: remainingSlots
+      });
+    }
   }
 
   return {
@@ -167,7 +259,8 @@ const getInstructorSlotsService = async (instructorId, queryDate) => {
     selectedDay: selectedDayName,
     isAvailable: daySchedule?.isAvailable || false,
     slots,
-    calendarWeek
+    calendarWeek,
+    ...(calendarMonth ? { calendarMonth } : {})
   };
 };
 
