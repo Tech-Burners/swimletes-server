@@ -283,9 +283,37 @@ const createBookingService = async (authUserId, payload) => {
     expiresAt
   });
 
+  // Auto-link or create chat between client and instructor for this booking
+  try {
+    const Chat = require('../Chat/chat.model');
+    let chat = await Chat.findOne({
+      participants: { $all: [booking.client, booking.instructor] }
+    });
+    if (chat) {
+      chat.booking = booking._id;
+      await chat.save();
+    } else {
+      chat = await Chat.create({
+        participants: [booking.client, booking.instructor],
+        booking: booking._id,
+        unreadCounts: {
+          [booking.client.toString()]: 0,
+          [booking.instructor.toString()]: 0
+        }
+      });
+    }
+    if (chat) {
+      booking.chat = chat._id;
+      await booking.save();
+    }
+  } catch (chatErr) {
+    console.error('Error linking chat to new booking:', chatErr);
+  }
+
   const populated = await Booking.findById(booking._id)
     .populate('client', 'fullName email image')
-    .populate('instructor', 'fullName email image');
+    .populate('instructor', 'fullName email image')
+    .populate('chat');
 
   return formatUserBookingCard(populated);
 };
@@ -610,7 +638,9 @@ const formatInstructorBookingDetails = async (booking) => {
       commissionPercentage,
       commissionAmount,
       youReceive
-    }
+    },
+    chatId: b.chat?._id || b.chat || null,
+    canChat: ['accepted', 'active'].includes(b.status)
   };
 };
 
@@ -681,7 +711,9 @@ const formatUserBookingDetails = (booking) => {
     },
     waiver: b.waiver || null,
     clientReview: b.clientReview || null,
-    instructorReview: b.instructorReview || null
+    instructorReview: b.instructorReview || null,
+    chatId: b.chat?._id || b.chat || null,
+    canChat: ['accepted', 'active'].includes(b.status)
   };
 };
 
@@ -772,9 +804,37 @@ const acceptBookingService = async (bookingId, instructorId) => {
   booking.status = 'accepted';
   await booking.save();
 
+  // Auto-link or create chat between client and instructor for this accepted booking
+  try {
+    const Chat = require('../Chat/chat.model');
+    let chat = await Chat.findOne({
+      participants: { $all: [booking.client, booking.instructor] }
+    });
+    if (chat) {
+      chat.booking = booking._id;
+      await chat.save();
+    } else {
+      chat = await Chat.create({
+        participants: [booking.client, booking.instructor],
+        booking: booking._id,
+        unreadCounts: {
+          [booking.client.toString()]: 0,
+          [booking.instructor.toString()]: 0
+        }
+      });
+    }
+    if (chat && (!booking.chat || booking.chat.toString() !== chat._id.toString())) {
+      booking.chat = chat._id;
+      await booking.save();
+    }
+  } catch (chatErr) {
+    console.error('Error linking chat to accepted booking:', chatErr);
+  }
+
   const populated = await Booking.findById(booking._id)
     .populate('client', 'fullName email image')
-    .populate('instructor', 'fullName email image');
+    .populate('instructor', 'fullName email image')
+    .populate('chat');
 
   return formatInstructorBookingCard(populated);
 };
@@ -834,6 +894,19 @@ const markBookingActiveService = async (bookingId, userId, userRole) => {
 
   booking.status = 'active';
   await booking.save();
+
+  try {
+    const Chat = require('../Chat/chat.model');
+    let chat = await Chat.findOne({
+      participants: { $all: [booking.client, booking.instructor] }
+    });
+    if (chat && (!chat.booking || chat.booking.toString() !== booking._id.toString())) {
+      chat.booking = booking._id;
+      await chat.save();
+    }
+  } catch (chatErr) {
+    console.error('Error linking chat on booking active:', chatErr);
+  }
 
   const populated = await Booking.findById(booking._id)
     .populate('client', 'fullName email image')

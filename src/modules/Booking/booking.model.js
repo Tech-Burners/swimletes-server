@@ -343,12 +343,24 @@ const bookingSchema = new mongoose.Schema(
     },
     lastRemindedAt: {
       type: Date
+    },
+
+    // Associated Chat Conversation
+    chat: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Chat',
+      default: null
     }
   },
   {
     timestamps: true
   }
 );
+
+// Method to check if messaging is allowed (only for 'accepted' or 'active' bookings)
+bookingSchema.methods.canChat = function () {
+  return ['accepted', 'active'].includes(this.status);
+};
 
 // Auto-generate human-readable Booking Reference ID (e.g. SW-782941)
 bookingSchema.pre('save', async function (next) {
@@ -360,5 +372,7 @@ bookingSchema.pre('save', async function (next) {
 });
 
 bookingSchema.index({ 'location.location': '2dsphere' });
+bookingSchema.index({ chat: 1 });
+bookingSchema.index({ client: 1, instructor: 1, status: 1 });
 
 module.exports = mongoose.model('Booking', bookingSchema);

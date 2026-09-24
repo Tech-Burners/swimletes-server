@@ -90,14 +90,25 @@ const chatSocketHandler = (io, socket, connectedUsers) => {
       }
     } catch (err) {
       console.error('Error in sendMessage socket handler:', err);
+      const errCode = err.statusCode || err.status || 500;
+      const errorPayload = {
+        status: errCode,
+        statusCode: errCode,
+        message: err.message || 'Failed to send message',
+        chatId: (typeof data === 'object' && data?.chatId) || null,
+        data: null,
+        result: null
+      };
+
+      // 1. Return via Ack Callback (for Postman Ack or frontend promises)
       if (typeof callback === 'function') {
-        callback({
-          status: 500,
-          message: err.message || 'Failed to send message',
-          data: null,
-          result: null
-        });
+        callback(errorPayload);
       }
+
+      // 2. Also emit directly to the sender's socket as an event
+      socket.emit('sendMessageError', errorPayload);
+      socket.emit('chatError', errorPayload);
+      socket.emit('error', errorPayload);
     }
   };
 
@@ -109,6 +120,12 @@ const chatSocketHandler = (io, socket, connectedUsers) => {
     try {
       const { chatId, isTyping = true } = typeof data === 'string' ? JSON.parse(data) : data;
       if (chatId) {
+        const chat = await Chat.findById(chatId).populate('booking');
+        if (chat && chat.booking && !['accepted', 'active'].includes(chat.booking.status)) {
+          // If booking is not active or accepted, do not broadcast typing
+          return;
+        }
+
         const payload = {
           chatId,
           userId,
@@ -120,7 +137,6 @@ const chatSocketHandler = (io, socket, connectedUsers) => {
         socket.to(`chat::${chatId}`).emit('userTyping', payload);
 
         // 2. Also emit directly to other participant's personal room (for Postman / Inbox / background)
-        const chat = await Chat.findById(chatId).select('participants');
         if (chat && chat.participants) {
           chat.participants.forEach((pId) => {
             if (pId.toString() !== userId.toString()) {

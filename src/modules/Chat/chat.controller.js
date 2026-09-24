@@ -29,8 +29,9 @@ const createOrGetChat = catchAsync(async (req, res) => {
 
 // 2. Get My Conversations (Inbox List) - Figma Screen 1
 const getMyConversations = catchAsync(async (req, res) => {
-  const { search, page, limit } = req.query;
-  const result = await getMyConversationsService(req.User._id, { search, page, limit });
+  const { search, searchTerm, page = 1, limit = 20 } = req.query;
+  const term = searchTerm !== undefined ? searchTerm : (search || '');
+  const result = await getMyConversationsService(req.User._id, { search: term, page, limit });
 
   return res.status(status.OK).json(
     response({
@@ -46,7 +47,7 @@ const getMyConversations = catchAsync(async (req, res) => {
 // 3. Get Chat Messages History - Figma Screen 2
 const getChatMessages = catchAsync(async (req, res) => {
   const { chatId } = req.params;
-  const { page, limit } = req.query;
+  const { page = 1, limit = 30 } = req.query;
   const result = await getChatMessagesService(req.User._id, chatId, { page, limit });
 
   return res.status(status.OK).json(

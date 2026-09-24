@@ -27,6 +27,9 @@ const response = (response = {}) => {
     if (response.forgetPasswordToken) {
         responseObject.data.forgetPasswordToken = response.forgetPasswordToken;
     }
+    if (response.pagination) {
+        responseObject.pagination = response.pagination;
+    }
     if (response.errors) {
         responseObject.errors = response.errors;
     }

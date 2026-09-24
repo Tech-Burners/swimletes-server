@@ -4,7 +4,72 @@ const ApiError = require('../../helpers/ApiError');
 const Chat = require('./chat.model');
 const Message = require('./message.model');
 const userModel = require('../User/user.model');
+const Booking = require('../Booking/booking.model');
 const { connectedUsers, isUserOnline } = require('../../socket/connectedUsers');
+
+/**
+ * Helper to determine if messaging is allowed between two participants based on booking status.
+ * Rule: Chatting is allowed ONLY when booking status is 'accepted' or 'active'.
+ * In all other states (pending, completed, cancelled, declined, disputed), users can view history but CANNOT send new messages.
+ */
+const checkChatBookingPermission = async (chat, userId, targetUserId) => {
+  let booking = null;
+
+  // 1. If chat already has a linked booking
+  if (chat && chat.booking && typeof chat.booking === 'object' && chat.booking.status) {
+    booking = chat.booking;
+  } else if (chat && chat.booking) {
+    booking = await Booking.findById(chat.booking);
+  }
+
+  // 2. If no booking linked to chat, search for an accepted or active booking between the two participants
+  if (!booking && targetUserId) {
+    booking = await Booking.findOne({
+      $or: [
+        { client: userId, instructor: targetUserId },
+        { client: targetUserId, instructor: userId }
+      ],
+      status: { $in: ['accepted', 'active'] }
+    });
+
+    if (booking && chat) {
+      chat.booking = booking._id;
+      await chat.save();
+    }
+  }
+
+  // 3. If still no active/accepted booking, find the latest booking between them
+  if (!booking && targetUserId) {
+    booking = await Booking.findOne({
+      $or: [
+        { client: userId, instructor: targetUserId },
+        { client: targetUserId, instructor: userId }
+      ]
+    }).sort({ createdAt: -1 });
+
+    if (booking && chat && !chat.booking) {
+      chat.booking = booking._id;
+      await chat.save();
+    }
+  }
+
+  const allowedStatuses = ['accepted', 'active'];
+  const isAllowed = Boolean(booking && allowedStatuses.includes(booking.status));
+
+  let reason = null;
+  if (!booking) {
+    reason = 'You are not allowed to send message because there is no active booking.';
+  } else if (!isAllowed) {
+    reason = `You are not allowed to send message because the booking is not active (current status: '${booking.status}'). Messaging is only allowed when the booking is accepted or active.`;
+  }
+
+  return {
+    canChat: isAllowed,
+    bookingStatus: booking?.status || null,
+    bookingId: booking?._id || null,
+    reason
+  };
+};
 
 /**
  * Format timestamp display (e.g., '10:30 AM', 'Yesterday', '19 Aug')
@@ -53,9 +118,8 @@ const createOrGetChatService = async (userId, targetUserId, bookingId = null) =>
   let chat = await Chat.findOne({
     participants: { $all: [userId, targetUserId] }
   })
-    .populate('participants', '_id fullName email image role isVerified bio about')
-    .populate('lastMessage')
-    .populate('booking');
+    .populate('participants', '_id fullName image')
+    .populate('booking', 'status');
 
   if (!chat) {
     chat = await Chat.create({
@@ -68,8 +132,8 @@ const createOrGetChatService = async (userId, targetUserId, bookingId = null) =>
     });
 
     chat = await Chat.findById(chat._id)
-      .populate('participants', '_id fullName email image role isVerified bio about')
-      .populate('booking');
+      .populate('participants', '_id fullName image')
+      .populate('booking', 'status');
   }
 
   // Format participant for UI
@@ -77,14 +141,21 @@ const createOrGetChatService = async (userId, targetUserId, bookingId = null) =>
     (p) => p._id.toString() !== userId.toString()
   );
 
+  const permission = await checkChatBookingPermission(chat, userId, otherParticipant?._id);
+
+  const partner = otherParticipant
+    ? {
+        _id: otherParticipant._id,
+        fullName: otherParticipant.fullName,
+        image: otherParticipant.image || '',
+        isOnline: isUserOnline(otherParticipant._id)
+      }
+    : null;
+
   return {
-    ...chat.toObject(),
-    otherParticipant: otherParticipant
-      ? {
-          ...otherParticipant.toObject(),
-          isOnline: isUserOnline(otherParticipant._id)
-        }
-      : null
+    _id: chat._id,
+    chatId: chat._id,
+    user: partner
   };
 };
 
@@ -92,21 +163,18 @@ const createOrGetChatService = async (userId, targetUserId, bookingId = null) =>
  * Get My Conversations (Inbox List) - Figma Screen 1 (40012257:2626)
  */
 const getMyConversationsService = async (userId, { search = '', page = 1, limit = 20 }) => {
-  const skip = (Number(page) - 1) * Number(limit);
+  const pageNum = Number(page) || 1;
+  const limitNum = Number(limit) || 20;
+  const skip = (pageNum - 1) * limitNum;
   const userObjId = new mongoose.Types.ObjectId(userId);
 
   // Find all chats user is participant of
   let chats = await Chat.find({ participants: userObjId })
-    .populate('participants', '_id fullName email image role isVerified bio about')
-    .populate('lastMessage')
-    .populate('booking')
-    .sort({ lastMessageAt: -1 })
-    .skip(skip)
-    .limit(Number(limit));
+    .populate('participants', '_id fullName image')
+    .populate('lastMessage', 'text')
+    .sort({ lastMessageAt: -1, updatedAt: -1 });
 
-  const total = await Chat.countDocuments({ participants: userObjId });
-
-  // Map conversations with otherUser, unread count, online status, formatted time
+  // Map conversations with clean UI structure
   let formattedConversations = chats.map((chat) => {
     const otherUser = chat.participants.find(
       (p) => p._id.toString() !== userId.toString()
@@ -114,47 +182,48 @@ const getMyConversationsService = async (userId, { search = '', page = 1, limit 
 
     const unreadCount = (chat.unreadCounts && chat.unreadCounts.get(userId.toString())) || 0;
 
+    const partner = otherUser
+      ? {
+          _id: otherUser._id,
+          fullName: otherUser.fullName,
+          image: otherUser.image || '',
+          isOnline: isUserOnline(otherUser._id)
+        }
+      : null;
+
+    const lastMessageText = chat.lastMessageText || chat.lastMessage?.text || '';
+    const lastTime = chat.lastMessageAt || chat.updatedAt;
+
     return {
       _id: chat._id,
       chatId: chat._id,
-      otherUser: otherUser
-        ? {
-            _id: otherUser._id,
-            fullName: otherUser.fullName,
-            image: otherUser.image,
-            role: otherUser.role,
-            isVerified: otherUser.isVerified,
-            isOnline: isUserOnline(otherUser._id)
-          }
-        : null,
-      lastMessage: chat.lastMessage,
-      lastMessageText: chat.lastMessageText || chat.lastMessage?.text || '',
-      lastMessageAt: chat.lastMessageAt || chat.updatedAt,
-      lastMessageTime: formatMessageTime(chat.lastMessageAt || chat.updatedAt),
-      unreadCount,
-      booking: chat.booking,
-      createdAt: chat.createdAt,
-      updatedAt: chat.updatedAt
+      user: partner,
+      lastMessage: lastMessageText,
+      time: formatMessageTime(lastTime),
+      unreadCount
     };
   });
 
-  // If search provided, filter by otherUser's name or lastMessageText
+  // If search provided, filter by otherUser's name or lastMessage
   if (search && search.trim()) {
     const q = search.trim().toLowerCase();
     formattedConversations = formattedConversations.filter(
       (c) =>
-        (c.otherUser?.fullName && c.otherUser.fullName.toLowerCase().includes(q)) ||
-        (c.lastMessageText && c.lastMessageText.toLowerCase().includes(q))
+        (c.user?.fullName && c.user.fullName.toLowerCase().includes(q)) ||
+        (c.lastMessage && c.lastMessage.toLowerCase().includes(q))
     );
   }
 
+  const total = formattedConversations.length;
+  const paginatedConversations = formattedConversations.slice(skip, skip + limitNum);
+
   return {
-    conversations: formattedConversations,
+    conversations: paginatedConversations,
     pagination: {
       total,
-      page: Number(page),
-      limit: Number(limit),
-      totalPages: Math.ceil(total / Number(limit))
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum) || 1
     }
   };
 };
@@ -162,15 +231,14 @@ const getMyConversationsService = async (userId, { search = '', page = 1, limit 
 /**
  * Get Message History for a Chat - Figma Screen 2 (40012262:7458)
  */
-const getChatMessagesService = async (userId, chatId, { page = 1, limit = 50 }) => {
+const getChatMessagesService = async (userId, chatId, { page = 1, limit = 30 }) => {
   if (!mongoose.Types.ObjectId.isValid(chatId)) {
     throw new ApiError(status.BAD_REQUEST, 'Invalid Chat ID');
   }
 
-  const chat = await Chat.findById(chatId).populate(
-    'participants',
-    '_id fullName email image role isVerified'
-  );
+  const chat = await Chat.findById(chatId)
+    .populate('participants', '_id fullName image')
+    .populate('booking', 'status');
 
   if (!chat) {
     throw new ApiError(status.NOT_FOUND, 'Chat conversation not found');
@@ -183,15 +251,17 @@ const getChatMessagesService = async (userId, chatId, { page = 1, limit = 50 }) 
     throw new ApiError(status.FORBIDDEN, 'You are not a participant in this chat');
   }
 
-  const skip = (Number(page) - 1) * Number(limit);
+  const pageNum = Number(page) || 1;
+  const limitNum = Number(limit) || 30;
+  const skip = (pageNum - 1) * limitNum;
 
-  // Fetch messages sorted ascending by date (or descending for pagination)
+  // Fetch messages sorted ascending by date
   const messages = await Message.find({ chatId })
-    .populate('sender', '_id fullName image role')
-    .populate('replyTo')
+    .populate('sender', '_id fullName image')
+    .populate('replyTo', '_id text')
     .sort({ createdAt: 1 })
     .skip(skip)
-    .limit(Number(limit));
+    .limit(limitNum);
 
   const total = await Message.countDocuments({ chatId });
 
@@ -224,10 +294,6 @@ const getChatMessagesService = async (userId, chatId, { page = 1, limit = 50 }) 
     }
   }
 
-  const otherParticipant = chat.participants.find(
-    (p) => p._id.toString() !== userId.toString()
-  );
-
   // Group messages by Date header for UI rendering (e.g., '19 August', 'Today')
   const groupedMessages = [];
   let currentDate = '';
@@ -255,30 +321,69 @@ const getChatMessagesService = async (userId, chatId, { page = 1, limit = 50 }) 
       });
     }
 
+    const senderId = msg.sender?._id ? msg.sender._id.toString() : (msg.sender?.toString() || '');
+    const isMe = senderId === userId.toString();
+
+    const senderObj = msg.sender && typeof msg.sender === 'object'
+      ? {
+          _id: msg.sender._id,
+          id: msg.sender._id,
+          fullName: msg.sender.fullName || '',
+          image: msg.sender.image || ''
+        }
+      : {
+          _id: msg.sender,
+          id: msg.sender,
+          fullName: '',
+          image: ''
+        };
+
     groupedMessages.push({
-      ...msg.toObject(),
-      isMe: msg.sender?._id?.toString() === userId.toString(),
-      timeFormatted: msgDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      _id: msg._id,
+      sender: senderObj,
+      text: msg.text || '',
+      images: msg.images || [],
+      files: msg.files || [],
+      voice: msg.voice || '',
+      messageType: msg.messageType || 'text',
+      time: msgDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isMe,
+      isRead: msg.isRead || false,
+      replyTo: msg.replyTo
+        ? {
+            _id: msg.replyTo._id,
+            text: msg.replyTo.text || ''
+          }
+        : null,
+      createdAt: msg.createdAt
     });
   });
+
+  const otherParticipant = chat.participants.find(
+    (p) => p._id.toString() !== userId.toString()
+  );
+
+  const partner = otherParticipant
+    ? {
+        _id: otherParticipant._id,
+        fullName: otherParticipant.fullName,
+        image: otherParticipant.image || '',
+        isOnline: isUserOnline(otherParticipant._id)
+      }
+    : null;
 
   return {
     chat: {
       _id: chat._id,
-      otherParticipant: otherParticipant
-        ? {
-            ...otherParticipant.toObject(),
-            isOnline: isUserOnline(otherParticipant._id)
-          }
-        : null
+      chatId: chat._id,
+      user: partner
     },
     messages: groupedMessages,
-    rawMessages: messages,
     pagination: {
       total,
-      page: Number(page),
-      limit: Number(limit),
-      totalPages: Math.ceil(total / Number(limit))
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum) || 1
     }
   };
 };
@@ -318,6 +423,12 @@ const sendMessageService = async (userId, { chatId, receiverId, text = '', image
 
   if (!actualReceiverId) {
     throw new ApiError(status.BAD_REQUEST, 'Unable to identify message recipient');
+  }
+
+  // Check booking permission: Chatting is allowed ONLY when booking status is 'accepted' or 'active'
+  const permission = await checkChatBookingPermission(targetChat, userId, actualReceiverId);
+  if (!permission.canChat) {
+    throw new ApiError(status.FORBIDDEN, permission.reason);
   }
 
   // Normalize both images and files input (unified handling for both)
