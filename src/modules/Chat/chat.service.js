@@ -422,6 +422,9 @@ const sendMessageService = async (userId, { chatId, receiverId, text = '', image
     io.to(chatRoom).emit('newMessage', populatedMessage);
     io.to(chatRoom).emit(`get message::${targetChat._id}`, populatedMessage);
 
+    // Also emit directly to receiver's room so they receive newMessage anywhere
+    io.to(receiverRoom).emit('newMessage', populatedMessage);
+
     // 2. Emit chat list update to receiver and sender (for inbox list screen)
     const chatListPayload = {
       chatId: targetChat._id,
@@ -472,11 +475,24 @@ const markChatAsReadService = async (userId, chatId) => {
   }
 
   if (global.io) {
-    global.io.to(`chat::${chatId}`).emit('messagesRead', {
+    const readPayload = {
       chatId,
       readBy: userId,
       readAt: new Date()
+    };
+
+    // 1. Emit to chat room
+    global.io.to(`chat::${chatId}`).emit('messagesRead', readPayload);
+
+    // 2. Also emit to other participants' personal rooms
+    const otherParticipants = (chat.participants || []).filter(
+      (p) => p.toString() !== userId.toString()
+    );
+    otherParticipants.forEach((pId) => {
+      global.io.to(`user::${pId.toString()}`).emit('messagesRead', readPayload);
     });
+
+    // 3. Emit badge update to reader
     global.io.to(`user::${userId.toString()}`).emit('chatListUpdate', {
       chatId,
       unreadCount: 0

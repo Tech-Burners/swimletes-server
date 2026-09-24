@@ -1,3 +1,4 @@
+const Chat = require('../../modules/Chat/chat.model');
 const {
   sendMessageService,
   markChatAsReadService,
@@ -45,7 +46,7 @@ const chatSocketHandler = (io, socket, connectedUsers) => {
 
   
   // 3. Real-Time Send Message
-  socket.on('sendMessage', async (data, callback) => {
+  const handleSendMessage = async (data, callback) => {
     try {
       const {
         chatId,
@@ -98,27 +99,46 @@ const chatSocketHandler = (io, socket, connectedUsers) => {
         });
       }
     }
-  });
+  };
+
+  socket.on('sendMessage', handleSendMessage);
+  socket.on('message', handleSendMessage);
 
   // 4. Real-Time Typing Indicator (Figma Screen 2)
-  socket.on('typing', (data) => {
+  const handleTyping = async (data) => {
     try {
       const { chatId, isTyping = true } = typeof data === 'string' ? JSON.parse(data) : data;
       if (chatId) {
-        socket.to(`chat::${chatId}`).emit('userTyping', {
+        const payload = {
           chatId,
           userId,
           fullName: userFullName,
           isTyping
-        });
+        };
+
+        // 1. Emit to chat room (for active chat screen)
+        socket.to(`chat::${chatId}`).emit('userTyping', payload);
+
+        // 2. Also emit directly to other participant's personal room (for Postman / Inbox / background)
+        const chat = await Chat.findById(chatId).select('participants');
+        if (chat && chat.participants) {
+          chat.participants.forEach((pId) => {
+            if (pId.toString() !== userId.toString()) {
+              socket.to(`user::${pId.toString()}`).emit('userTyping', payload);
+            }
+          });
+        }
       }
     } catch (err) {
       console.error('Error in typing socket handler:', err);
     }
-  });
+  };
+
+  socket.on('typing', handleTyping);
+  socket.on('userTyping', handleTyping);
 
   // 5. Real-Time Mark As Read (Read Receipts)
-  socket.on('markAsRead', async (data, callback) => {
+  const handleMarkAsRead = async (data, callback) => {
     try {
       const { chatId } = typeof data === 'string' ? JSON.parse(data) : data;
       if (chatId) {
@@ -133,7 +153,11 @@ const chatSocketHandler = (io, socket, connectedUsers) => {
         callback({ status: 500, message: err.message });
       }
     }
-  });
+  };
+
+  socket.on('markAsRead', handleMarkAsRead);
+  socket.on('messagesRead', handleMarkAsRead);
+  socket.on('readMessage', handleMarkAsRead);
 
   // 6. Check Online Status of a specific user
   socket.on('checkUserOnline', (data, callback) => {
