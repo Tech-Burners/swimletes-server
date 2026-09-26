@@ -106,6 +106,7 @@ const localAuth = catchAsync(async (req, res) => {
     data: {
       _id: user._id,
       fullName: user.fullName,
+      dob:user.dob,
       email: user.email,
       role: user.role,
       status: user.status,

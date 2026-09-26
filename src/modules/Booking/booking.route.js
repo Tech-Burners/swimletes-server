@@ -52,8 +52,9 @@ router.patch('/:id/cancel', auth(['user', 'instructor', 'admin']), cancelBooking
 router.patch('/status/:id', auth(['user', 'instructor', 'admin']), updateBookingStatus);
 router.patch('/:id/status', auth(['user', 'instructor', 'admin']), updateBookingStatus);
 
-// 8. Booking Details by ID
-router.get('/:id', auth(['user', 'instructor', 'admin']), getBookingDetails);
+// 8. Booking Details by ID (Figma 40012321:3120)
+router.get('/request/:id', auth(['user', 'instructor', 'admin'], { optional: true }), getBookingDetails);
+router.get('/:id', auth(['user', 'instructor', 'admin'], { optional: true }), getBookingDetails);
 
 module.exports = router;
 

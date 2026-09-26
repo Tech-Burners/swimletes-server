@@ -88,8 +88,28 @@ const createReviewService = async (reviewerId, payload) => {
   // Determine reviewer role and reviewee
   let reviewerRole;
   let revieweeId;
+  let effectiveReviewerId = reviewerId;
 
-  if (isClient) {
+  const targetRole = payload.targetRole || payload.target || null;
+  const explicitReviewee = payload.reviewee || payload.revieweeId || null;
+
+  if (targetRole === 'instructor' || (explicitReviewee && String(explicitReviewee) === booking.instructor.toString())) {
+    reviewerRole = 'user';
+    revieweeId = booking.instructor;
+    effectiveReviewerId = booking.client;
+
+    if (booking.isClientReviewed) {
+      throw new ApiError(httpStatus.BAD_REQUEST, 'Client has already reviewed this booking');
+    }
+  } else if (targetRole === 'user' || targetRole === 'client' || (explicitReviewee && String(explicitReviewee) === booking.client.toString())) {
+    reviewerRole = 'instructor';
+    revieweeId = booking.client;
+    effectiveReviewerId = booking.instructor;
+
+    if (booking.isInstructorReviewed) {
+      throw new ApiError(httpStatus.BAD_REQUEST, 'Instructor has already reviewed this booking');
+    }
+  } else if (isClient) {
     reviewerRole = 'user';
     revieweeId = booking.instructor;
 
@@ -108,17 +128,17 @@ const createReviewService = async (reviewerId, payload) => {
   // Ensure no existing review document in database for this reviewer and booking
   const existingReview = await Review.findOne({
     booking: booking._id,
-    reviewer: reviewerId
+    reviewer: effectiveReviewerId
   });
 
   if (existingReview) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'You have already submitted a review for this booking');
+    throw new ApiError(httpStatus.BAD_REQUEST, 'A review has already been submitted for this booking and reviewer');
   }
 
   // Create review document
   const review = await Review.create({
     booking: booking._id,
-    reviewer: reviewerId,
+    reviewer: effectiveReviewerId,
     reviewee: revieweeId,
     reviewerRole,
     rating: numericRating,
@@ -126,7 +146,7 @@ const createReviewService = async (reviewerId, payload) => {
   });
 
   // Update Booking flags
-  if (isClient) {
+  if (reviewerRole === 'user') {
     booking.isClientReviewed = true;
     booking.clientReview = review._id;
   } else {

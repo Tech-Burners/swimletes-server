@@ -60,11 +60,14 @@ const getBookingTabCounts = catchAsync(async (req, res) => {
 
 // Get booking details
 const getBookingDetails = catchAsync(async (req, res) => {
-  const result = await getBookingByIdService(req.params.id, req.User._id, req.User.role);
+  const userId = req.User ? req.User._id : null;
+  const userRole = req.User ? req.User.role : (req.query.role || 'instructor');
+  const result = await getBookingByIdService(req.params.id, userId, userRole);
   return res.status(status.OK).json(
     response({
       status: 'OK',
       statusCode: status.OK,
+      type: 'BookingDetails',
       message: 'Booking details fetched successfully',
       data: result
     })

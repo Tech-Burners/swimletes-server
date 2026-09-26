@@ -28,6 +28,7 @@ const {
   togglePushNotificationController,
   getPushNotificationController,
   getUserHomeController,
+  getInstructorHomeController,
   updateUserLocationController,
   getAdminClientsListController,
   getAdminClientDetailsController,
@@ -43,6 +44,12 @@ ensureUploadFolderExists(UPLOADS_FOLDER_USERS);
 // User Home / Dashboard (Top Rated Instructors Near You - Figma 40010003:11)
 router.get("/home", tokenCheck, getUserHomeController);
 router.get("/top-instructors", tokenCheck, getUserHomeController);
+
+// Instructor Home / Dashboard (Figma 40012288:1871)
+router.get("/instructor/home", tokenCheck, getInstructorHomeController);
+router.get("/home-instructor", tokenCheck, getInstructorHomeController);
+router.get("/instructor-home", tokenCheck, getInstructorHomeController);
+
 router.patch("/location", auth(['user', 'instructor', 'admin']), updateUserLocationController);
 router.patch("/update-location", auth(['user', 'instructor', 'admin']), updateUserLocationController);
 

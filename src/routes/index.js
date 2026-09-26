@@ -21,6 +21,10 @@ const moduleRoutes = [
     route: userRoutes
   },
   {
+    path: '/users',
+    route: userRoutes
+  },
+  {
     path: '/chat',
     route: chatRoutes
   },

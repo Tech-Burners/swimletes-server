@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 const Booking = require('./booking.model');
 const User = require('../User/user.model');
 const ApiError = require('../../helpers/ApiError');
-const httpStatus = require('http-status');
+const { status: httpStatus } = require('http-status');
 
 /**
  * Safely parse date without UTC offset shifting
@@ -68,6 +68,7 @@ const formatUserBookingCard = (booking) => {
 
   return {
     _id: b._id,
+    bookingId: b.bookingId || '',
     status: b.status,
     formattedDate,
     relativeTime,
@@ -156,6 +157,7 @@ const formatInstructorBookingCard = (booking) => {
 
   return {
     _id: b._id,
+    bookingId: b.bookingId || '',
     status: b.status,
     formattedDate,
     relativeTime,
@@ -396,7 +398,7 @@ const createBookingService = async (authUserId, payload) => {
  */
 const getMyBookingsService = async (userId, role, queryParams = {}) => {
   const {
-    tab = 'all',
+    tab,
     status: statusFilter,
     page = 1,
     limit = 20,
@@ -407,9 +409,6 @@ const getMyBookingsService = async (userId, role, queryParams = {}) => {
   const limitNum = Math.max(1, Number(limit) || 20);
   const skip = (pageNum - 1) * limitNum;
 
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-
   const query = {};
 
   if (role === 'instructor') {
@@ -419,19 +418,23 @@ const getMyBookingsService = async (userId, role, queryParams = {}) => {
   }
 
   // Process Tab Filters
-  const normalizedTab = String(tab).toLowerCase().trim();
+  const rawTab = String(tab || statusFilter || 'upcoming').toLowerCase().trim();
+  const normalizedTab = rawTab;
 
-  if (normalizedTab === 'upcoming') {
+  if (['upcoming', 'accepted'].includes(normalizedTab)) {
     query.status = 'accepted';
-    query.date = { $gte: startOfToday };
   } else if (normalizedTab === 'active') {
     query.status = 'active';
   } else if (normalizedTab === 'completed') {
     query.status = 'completed';
   } else if (['requests', 'to_confirm', 'requested', 'pending', 'pending_approval'].includes(normalizedTab)) {
     query.status = 'pending';
-  } else if (normalizedTab === 'cancelled') {
+  } else if (['cancelled', 'declined'].includes(normalizedTab)) {
     query.status = { $in: ['cancelled', 'declined'] };
+  } else if (normalizedTab === 'all') {
+    if (statusFilter) {
+      query.status = statusFilter;
+    }
   } else if (statusFilter) {
     query.status = statusFilter;
   }
@@ -446,7 +449,7 @@ const getMyBookingsService = async (userId, role, queryParams = {}) => {
   }
 
   let sortOrder = { date: -1, createdAt: -1 };
-  if (['upcoming', 'requests', 'to_confirm', 'requested', 'pending'].includes(normalizedTab)) {
+  if (['upcoming', 'accepted', 'requests', 'to_confirm', 'requested', 'pending'].includes(normalizedTab)) {
     sortOrder = { date: 1, startTime: 1 };
   }
 
@@ -482,12 +485,10 @@ const getMyBookingsService = async (userId, role, queryParams = {}) => {
  */
 const getBookingTabCountsService = async (userId, role) => {
   const userQuery = role === 'instructor' ? { instructor: userId } : { client: userId };
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
 
   const [pendingCount, acceptedUpcomingCount, activeCount, completedCount, cancelledCount] = await Promise.all([
     Booking.countDocuments({ ...userQuery, status: 'pending' }),
-    Booking.countDocuments({ ...userQuery, status: 'accepted', date: { $gte: startOfToday } }),
+    Booking.countDocuments({ ...userQuery, status: 'accepted' }),
     Booking.countDocuments({ ...userQuery, status: 'active' }),
     Booking.countDocuments({ ...userQuery, status: 'completed' }),
     Booking.countDocuments({ ...userQuery, status: { $in: ['cancelled', 'declined'] } })
@@ -517,281 +518,30 @@ const getBookingTabCountsService = async (userId, role) => {
 };
 
 /**
- * Format Instructor Booking Details (Figma nodes 40012336:11722, 40012368:668, 40012368:3011)
+ * Format Member Duration (e.g., "2y", "3mo", "2w", "5d")
  */
-const formatInstructorBookingDetails = async (booking) => {
-  const b = booking.toObject ? booking.toObject() : booking;
-  const bookingDate = parseBookingDate(b.date);
+const formatMemberDuration = (createdAt) => {
+  if (!createdAt) return 'New';
+  const created = new Date(createdAt);
   const now = new Date();
-
-  const daysShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-  let formattedDate = '';
-  let dayName = '';
-  let monthName = '';
-  let dateNum = '';
-  let timeRange = b.startTime && b.endTime ? `${b.startTime} – ${b.endTime}` : (b.startTime || '');
-
-  if (bookingDate && !isNaN(bookingDate.getTime())) {
-    dayName = daysShort[bookingDate.getDay()];
-    monthName = monthsShort[bookingDate.getMonth()];
-    dateNum = bookingDate.getDate();
-    formattedDate = `${dayName}, ${monthName} ${dateNum} · ${b.startTime || ''}`;
+  const diffDays = Math.round((now - created) / (1000 * 60 * 60 * 24));
+  if (diffDays >= 365) {
+    const years = Math.floor(diffDays / 365);
+    return `${years}y`;
   }
-
-  // Calculate client stats (Booked by card)
-  const clientId = b.client?._id;
-  let lessonsBooked = 14;
-  let cancels = 0;
-  let memberSince = '2y';
-
-  if (clientId) {
-    try {
-      const [bookedCount, cancelCount, clientUser] = await Promise.all([
-        Booking.countDocuments({ client: clientId, status: { $in: ['completed', 'accepted', 'active'] } }),
-        Booking.countDocuments({ client: clientId, status: 'cancelled' }),
-        User.findById(clientId).select('createdAt avgRating totalReviews rating')
-      ]);
-
-      if (bookedCount > 0) lessonsBooked = bookedCount;
-      cancels = cancelCount;
-
-      if (clientUser?.createdAt) {
-        const diffYears = (Date.now() - new Date(clientUser.createdAt).getTime()) / (1000 * 60 * 60 * 24 * 365.25);
-        if (diffYears >= 1) {
-          memberSince = `${Math.floor(diffYears)}y`;
-        } else {
-          const diffMonths = Math.max(1, Math.floor(diffYears * 12));
-          memberSince = `${diffMonths}m`;
-        }
-      }
-    } catch (err) {
-      // Fallback to defaults
-    }
+  if (diffDays >= 30) {
+    const months = Math.floor(diffDays / 30);
+    return `${months}mo`;
   }
-
-  // Format comfort level
-  const comfortLevelMap = {
-    never_been_in_water: 'Never been in water',
-    nervous_beginner: 'Nervous Beginner',
-    can_float_paddle: 'Can float & paddle',
-    swims_confidently: 'Swims Confidently'
-  };
-  const comfortLevelText = comfortLevelMap[b.swimmer?.comfortLevel] || b.swimmer?.comfortLevel || 'Nervous Beginner';
-
-  // Financial breakdown
-  const parentPays = Number(b.pricing?.totalAmount || b.pricing?.lessonPrice || 63);
-  const commissionPercentage = 15;
-  const commissionAmount = Number(b.pricing?.platformCommission || +(parentPays * 0.15).toFixed(2));
-  const youReceive = Number(b.pricing?.instructorEarnings || +(parentPays - commissionAmount).toFixed(2));
-
-  // Status specific headers, alerts, payouts & action buttons
-  let statusBanner = null;
-  let alert = null;
-  let payout = null;
-  let actionButtons = [];
-
-  if (b.status === 'active') {
-    // Figma Node 40012336:11722 - Active Details
-    statusBanner = {
-      type: 'in_progress',
-      statusTitle: 'Lesson in progress',
-      remainingTime: '22:14',
-      statusSubtitle: `remaining · ends ${b.endTime || '4:00 PM'}`
-    };
-    actionButtons = [
-      { key: 'complete', label: 'Mark as complete', type: 'primary' }
-    ];
-  } else if (b.status === 'accepted') {
-    // Figma Node 40012368:668 - Upcoming Details
-    statusBanner = {
-      type: 'upcoming',
-      statusTitle: formattedDate,
-      statusSubtitle: `${timeRange} · ${b.lessonType || '60-min private lesson'}`
-    };
-    actionButtons = [
-      { key: 'message', label: `Message ${b.client?.fullName || 'Hannah'}`, type: 'primary', recipientId: b.client?._id },
-      { key: 'cancel', label: 'Cancel Booking', type: 'destructive' }
-    ];
-  } else if (b.status === 'completed') {
-    // Figma Node 40012368:3011 - Completed Details
-    statusBanner = {
-      type: 'completed',
-      chip: 'Payment Pending',
-      statusTitle: formattedDate,
-      statusSubtitle: `${b.duration || 60} min · ${b.location?.poolName || 'Oak Lawn Community Pool'}`
-    };
-    alert = {
-      type: 'info',
-      message: `Payout releases automatically in 72 hours if ${b.client?.fullName || 'Hannah'} doesn't confirm.`
-    };
-    payout = {
-      status: 'Pending',
-      subtext: 'Moves to Available once confirmed',
-      amount: youReceive
-    };
-    actionButtons = [
-      { key: 'send_reminder', label: 'Send a Reminder', type: 'primary' }
-    ];
-  } else if (b.status === 'pending') {
-    // Requests / Pending Approval Details
-    let expiresIn = null;
-    if (b.expiresAt) {
-      const diffMs = new Date(b.expiresAt).getTime() - Date.now();
-      if (diffMs > 0) {
-        const hours = Math.floor(diffMs / (1000 * 60 * 60));
-        const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-        expiresIn = hours > 0 ? `Expires in ${hours}h ${minutes}m` : `Expires in ${minutes}m`;
-      } else {
-        expiresIn = 'Expired';
-      }
-    }
-    statusBanner = {
-      type: 'pending',
-      statusTitle: formattedDate,
-      statusSubtitle: expiresIn || 'Expires in 24h',
-      expiresIn
-    };
-    actionButtons = [
-      { key: 'decline', label: 'Decline', type: 'secondary' },
-      { key: 'accept', label: 'Accept', type: 'primary' }
-    ];
-  } else if (b.status === 'cancelled') {
-    statusBanner = {
-      type: 'cancelled',
-      statusTitle: 'Booking Cancelled',
-      statusSubtitle: b.cancellationReason || 'Cancelled'
-    };
+  if (diffDays >= 7) {
+    const weeks = Math.floor(diffDays / 7);
+    return `${weeks}w`;
   }
-
-  const poolAddress = b.location?.address || '3418 Cedar Springs Rd, Dallas, TX 75219';
-  const poolDetails = `${poolAddress} · Indoor, heated to 86°F · Free parking on site`;
-
-  return {
-    _id: b._id,
-    bookingId: b.bookingId,
-    status: b.status,
-    formattedDate,
-    timeRange,
-    lessonType: b.lessonType || '60-min private lesson',
-    statusBanner,
-    alert,
-    payout,
-    actionButtons,
-    bookedBy: {
-      _id: b.client?._id,
-      fullName: b.client?.fullName || 'Hannah Cooper',
-      image: b.client?.image || 'user.jpg',
-      phoneNumber: b.client?.number || '',
-      rating: 4.9,
-      ratingText: '4.9 · rated by 6 instructors',
-      stats: {
-        lessonsBooked,
-        cancels,
-        memberSince
-      }
-    },
-    swimmer: {
-      name: b.swimmer?.name || 'Amira',
-      age: b.swimmer?.age || 7,
-      display: `${b.swimmer?.name || 'Amira'}, age ${b.swimmer?.age || 7}`,
-      comfortLevel: comfortLevelText,
-      notes: b.swimmer?.notes || "She's nervous about putting his face in the water. We've tried group lessons before and she froze up."
-    },
-    where: {
-      poolName: b.location?.poolName || 'Oak Lawn Community Pool',
-      address: poolAddress,
-      details: poolDetails,
-      mapImage: 'https://images.unsplash.com/photo-1576013551627-0cc20b96c2a7?w=600',
-      coordinates: b.location?.location?.coordinates || [-96.8123, 32.8123]
-    },
-    earnings: {
-      parentPays,
-      commissionPercentage,
-      commissionAmount,
-      youReceive
-    },
-    chatId: b.chat?._id || b.chat || null,
-    canChat: ['accepted', 'active'].includes(b.status)
-  };
+  return `${Math.max(1, diffDays)}d`;
 };
 
 /**
- * Format User Booking Details
- */
-const formatUserBookingDetails = (booking) => {
-  const b = booking.toObject ? booking.toObject() : booking;
-  const bookingDate = parseBookingDate(b.date);
-
-  const daysShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-  let formattedDate = '';
-  let timeRange = b.startTime && b.endTime ? `${b.startTime} – ${b.endTime}` : (b.startTime || '');
-
-  if (bookingDate && !isNaN(bookingDate.getTime())) {
-    const dayName = daysShort[bookingDate.getDay()];
-    const monthName = monthsShort[bookingDate.getMonth()];
-    const dateNum = bookingDate.getDate();
-    formattedDate = `${dayName}, ${monthName} ${dateNum} · ${b.startTime || ''}`;
-  }
-
-  const comfortLevelMap = {
-    never_been_in_water: 'Never been in water',
-    nervous_beginner: 'Nervous Beginner',
-    can_float_paddle: 'Can float & paddle',
-    swims_confidently: 'Swims Confidently'
-  };
-
-  return {
-    _id: b._id,
-    bookingId: b.bookingId,
-    status: b.status,
-    formattedDate,
-    timeRange,
-    lessonType: b.lessonType || '60-min private lesson',
-    duration: b.duration || 60,
-    instructor: {
-      _id: b.instructor?._id,
-      fullName: b.instructor?.fullName || 'Instructor',
-      image: b.instructor?.image || 'user.jpg',
-      phoneNumber: b.instructor?.number || '',
-      avgRating: b.instructor?.avgRating || 5.0,
-      totalReviews: b.instructor?.totalReviews || 0,
-      address: b.instructor?.address || ''
-    },
-    swimmer: {
-      name: b.swimmer?.name || '',
-      age: b.swimmer?.age || 0,
-      display: `${b.swimmer?.name || 'Swimmer'}, age ${b.swimmer?.age || 0}`,
-      comfortLevel: comfortLevelMap[b.swimmer?.comfortLevel] || b.swimmer?.comfortLevel || 'Nervous Beginner',
-      notes: b.swimmer?.notes || ''
-    },
-    location: {
-      poolName: b.location?.poolName || '',
-      address: b.location?.address || '',
-      locationType: b.location?.locationType || 'public_pool',
-      coordinates: b.location?.location?.coordinates || [0, 0]
-    },
-    pricing: {
-      lessonPrice: Number(b.pricing?.lessonPrice || 0),
-      bookingFee: Number(b.pricing?.bookingFee || 0),
-      poolEntryFee: Number(b.pricing?.poolEntryFee || 0),
-      travelFee: Number(b.pricing?.travelFee || 0),
-      discountAmount: Number(b.pricing?.discountAmount || 0),
-      totalAmount: Number(b.pricing?.totalAmount || 0)
-    },
-    waiver: b.waiver || null,
-    clientReview: b.clientReview || null,
-    instructorReview: b.instructorReview || null,
-    chatId: b.chat?._id || b.chat || null,
-    canChat: ['accepted', 'active'].includes(b.status)
-  };
-};
-
-/**
- * Get Booking Details by ID (Full detail view matching Figma screens)
+ * Get Booking Details by ID (Clean database data, matching Figma 40012321:3120, no unnecessary internal fields)
  */
 const getBookingByIdService = async (bookingId, userId, userRole) => {
   if (!mongoose.Types.ObjectId.isValid(bookingId)) {
@@ -799,8 +549,8 @@ const getBookingByIdService = async (bookingId, userId, userRole) => {
   }
 
   const booking = await Booking.findById(bookingId)
-    .populate('client', 'fullName email image number address createdAt')
-    .populate('instructor', 'fullName email image number bio address certifications avgRating totalReviews')
+    .populate('client', 'fullName email image number address createdAt avgRating totalReviews ratingCount')
+    .populate('instructor', 'fullName email image number bio address certifications avgRating totalReviews ratingCount')
     .populate('clientReview')
     .populate('instructorReview');
 
@@ -808,19 +558,178 @@ const getBookingByIdService = async (bookingId, userId, userRole) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
   }
 
-  const isClient = booking.client && booking.client._id.toString() === userId.toString();
-  const isInstructor = booking.instructor && booking.instructor._id.toString() === userId.toString();
+  const isClient = booking.client && booking.client._id && userId && booking.client._id.toString() === userId.toString();
+  const isInstructor = booking.instructor && booking.instructor._id && userId && booking.instructor._id.toString() === userId.toString();
   const isAdmin = userRole === 'admin';
 
-  if (!isClient && !isInstructor && !isAdmin) {
+  if (userId && !isClient && !isInstructor && !isAdmin) {
     throw new ApiError(httpStatus.FORBIDDEN, 'You are not authorized to view this booking');
   }
 
-  if (userRole === 'instructor' || isInstructor) {
-    return formatInstructorBookingDetails(booking);
+  const b = booking.toObject ? booking.toObject() : booking;
+
+  // Real client stats from database (if client exists)
+  let clientStats = null;
+  if (b.client && b.client._id) {
+    const [bookedCount, cancelCount] = await Promise.all([
+      Booking.countDocuments({ client: b.client._id, status: { $in: ['completed', 'accepted', 'active'] } }),
+      Booking.countDocuments({ client: b.client._id, status: 'cancelled' })
+    ]);
+    clientStats = {
+      lessonsBooked: bookedCount,
+      cancels: cancelCount,
+      memberSince: formatMemberDuration(b.client.createdAt)
+    };
   }
 
-  return formatUserBookingDetails(booking);
+  // Real schedule conflict check from database (if instructor exists)
+  let scheduleConflict = {
+    hasConflict: false,
+    title: 'No schedule conflict',
+    description: 'No other lessons scheduled for this day'
+  };
+
+  if (b.instructor && b.instructor._id && b.date) {
+    try {
+      const dayStart = new Date(b.date);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(b.date);
+      dayEnd.setHours(23, 59, 59, 999);
+
+      const otherBookings = await Booking.find({
+        instructor: b.instructor._id,
+        _id: { $ne: b._id },
+        date: { $gte: dayStart, $lte: dayEnd },
+        status: { $in: ['accepted', 'active'] }
+      }).sort({ startTime: 1 });
+
+      const conflict = otherBookings.find((ob) => ob.startTime === b.startTime);
+
+      if (conflict) {
+        scheduleConflict = {
+          hasConflict: true,
+          title: 'Schedule conflict detected',
+          description: `Conflict with another lesson at ${conflict.startTime} – ${conflict.endTime}`
+        };
+      } else if (otherBookings.length > 0) {
+        const nextBooking = otherBookings[0];
+        scheduleConflict = {
+          hasConflict: false,
+          title: 'No schedule conflict',
+          description: `Your other lesson that day is ${nextBooking.startTime} – ${nextBooking.endTime}`
+        };
+      }
+    } catch (err) {
+      // Continue cleanly if error checking conflict
+    }
+  }
+
+  // Format date and time
+  const bookingDate = parseBookingDate(b.date);
+  const daysShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  let formattedDate = '';
+  if (bookingDate && !isNaN(bookingDate.getTime())) {
+    const dayName = daysShort[bookingDate.getDay()];
+    const monthName = monthsShort[bookingDate.getMonth()];
+    const dateNum = bookingDate.getDate();
+    formattedDate = `${dayName}, ${monthName} ${dateNum} · ${b.startTime || ''}`;
+  }
+
+  const lessonSubtitle = b.startTime && b.endTime
+    ? `${b.startTime} – ${b.endTime} · ${b.lessonType || '60-min private lesson'}`
+    : (b.lessonType || '60-min private lesson');
+
+  const comfortLevelMap = {
+    never_been_in_water: 'Never been in water',
+    nervous_beginner: 'Nervous Beginner',
+    can_float_paddle: 'Can float & paddle',
+    swims_confidently: 'Swims Confidently'
+  };
+
+  // Expiration countdown for pending booking requests
+  let expiresIn = null;
+  if (b.status === 'pending' && b.expiresAt) {
+    const diffMs = new Date(b.expiresAt).getTime() - Date.now();
+    if (diffMs <= 0) {
+      expiresIn = 'Expired';
+    } else {
+      const hours = Math.floor(diffMs / (1000 * 60 * 60));
+      const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      expiresIn = hours > 0 ? `Expires in ${hours}h ${minutes}m` : `Expires in ${minutes}m`;
+    }
+  }
+
+  const parentPays = Number(b.pricing?.totalAmount || 0);
+  const youReceive = Number(b.pricing?.instructorEarnings || 0);
+  const commissionAmount = Number(b.pricing?.platformCommission || (parentPays - youReceive));
+  const commissionPercentage = parentPays > 0 ? Math.round((commissionAmount / parentPays) * 100) : 15;
+
+  const clientRating = Number(b.client?.avgRating || 0);
+  const clientReviewCount = Number(b.client?.totalReviews || b.client?.ratingCount || 0);
+
+  const instructorRating = Number(b.instructor?.avgRating || 0);
+  const instructorReviewCount = Number(b.instructor?.totalReviews || b.instructor?.ratingCount || 0);
+
+  return {
+    _id: b._id,
+    bookingId: b.bookingId || '',
+    status: b.status,
+    formattedDate,
+    lessonSubtitle,
+    startTime: b.startTime || '',
+    endTime: b.endTime || '',
+    time: b.startTime && b.endTime ? `${b.startTime} – ${b.endTime}` : (b.startTime || ''),
+    lessonType: b.lessonType || '60-min private lesson',
+    ...(b.status === 'pending' && expiresIn ? { expiresIn } : {}),
+    pricing: {
+      parentPays,
+      commissionPercentage,
+      commissionAmount,
+      youReceive
+    },
+    client: b.client ? {
+      _id: b.client._id,
+      fullName: b.client.fullName || '',
+      image: b.client.image || '',
+      rating: clientRating,
+      totalReviews: clientReviewCount,
+      ratingText: clientReviewCount > 0 ? `${clientRating.toFixed(1)} · rated by ${clientReviewCount} instructor${clientReviewCount === 1 ? '' : 's'}` : 'New client',
+      lessonsBooked: clientStats?.lessonsBooked || 0,
+      cancels: clientStats?.cancels || 0,
+      memberSince: clientStats?.memberSince || 'New'
+    } : null,
+    ...(userRole === 'user' && b.instructor ? {
+      instructor: {
+        _id: b.instructor._id,
+        fullName: b.instructor.fullName || '',
+        image: b.instructor.image || '',
+        rating: instructorRating,
+        totalReviews: instructorReviewCount,
+        ratingText: instructorReviewCount > 0 ? `${instructorRating.toFixed(1)} (${instructorReviewCount} review${instructorReviewCount === 1 ? '' : 's'})` : 'No reviews yet'
+      }
+    } : {}),
+    swimmer: {
+      name: b.swimmer?.name || '',
+      age: b.swimmer?.age || 0,
+      comfortLevel: comfortLevelMap[b.swimmer?.comfortLevel] || b.swimmer?.comfortLevel || '',
+      notes: b.swimmer?.notes || ''
+    },
+    location: {
+      poolName: b.location?.poolName || '',
+      address: b.location?.address || '',
+      coordinates: b.location?.location?.coordinates || []
+    },
+    scheduleConflict,
+    chatId: b.chat?._id || b.chat || null,
+    canChat: ['accepted', 'active'].includes(b.status),
+    canAccept: b.status === 'pending',
+    canDecline: b.status === 'pending',
+    canStart: b.status === 'accepted',
+    canComplete: b.status === 'active',
+    canCancel: ['pending', 'accepted'].includes(b.status)
+  };
 };
 
 /**

@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Swimletes - Instructor Experience</title>
+  
+  <!-- Modern Google Font: Inter Tight (matching Figma typography) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="device-mode">
+
+  <!-- Desktop Presentation Control Bar -->
+  <header class="app-control-bar" id="appControlBar">
+    <div class="brand-badge">
+      <span class="logo-dot"></span>
+      <span class="brand-text">SWIMLETES</span>
+      <span class="figma-tag">Figma Dev Sync</span>
+    </div>
+
+    <div class="screen-selector">
+      <button class="nav-tab-btn active" id="btnTabHome" onclick="switchScreen('home')">
+        <span class="tab-num">1</span>
+        <span>Instructor Home (40012288:1871)</span>
+      </button>
+      <button class="nav-tab-btn" id="btnTabDetails" onclick="switchScreen('details')">
+        <span class="tab-num">2</span>
+        <span>Lesson Details (40012321:3120)</span>
+      </button>
+    </div>
+
+    <div class="view-controls">
+      <div class="api-status" id="apiStatusBadge">
+        <span class="pulse-indicator"></span>
+        <span id="apiStatusText">Live API (8049)</span>
+      </div>
+      <button class="toggle-mode-btn" id="btnToggleView" onclick="toggleDeviceMode()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="5" y="2" width="14" height="20" rx="3"></rect>
+          <line x1="12" y1="18" x2="12.01" y2="18"></line>
+        </svg>
+        <span id="toggleViewText">Expand View</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Device Container Chassis (iPhone 16 Pro styling) -->
+  <main class="device-viewport" id="deviceViewport">
+    <div class="device-frame" id="deviceFrame">
+      
+      <!-- iPhone Dynamic Island & Speaker -->
+      <div class="device-notch">
+        <div class="dynamic-island">
+          <div class="camera-lens"></div>
+        </div>
+      </div>
+
+      <!-- Live iOS Status Bar -->
+      <div class="ios-status-bar" id="statusBar">
+        <div class="status-time" id="statusClock">9:41</div>
+        <div class="status-icons">
+          <!-- Cellular -->
+          <svg class="status-icon" width="18" height="12" viewBox="0 0 18 12" fill="currentColor">
+            <rect x="0" y="8" width="3" height="4" rx="0.8" />
+            <rect x="4.5" y="6" width="3" height="6" rx="0.8" />
+            <rect x="9" y="3" width="3" height="9" rx="0.8" />
+            <rect x="13.5" y="0" width="3" height="12" rx="0.8" />
+          </svg>
+          <!-- Wifi -->
+          <svg class="status-icon" width="16" height="12" viewBox="0 0 16 12" fill="currentColor">
+            <path d="M8 9.5C8.82843 9.5 9.5 8.82843 9.5 8C9.5 7.17157 8.82843 6.5 8 6.5C7.17157 6.5 6.5 7.17157 6.5 8C6.5 8.82843 7.17157 9.5 8 9.5Z" />
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M3.75736 3.75736C6.10051 1.41421 9.89949 1.41421 12.2426 3.75736L13.6569 2.34315C10.5327 -0.781049 5.46734 -0.781049 2.34315 2.34315L3.75736 3.75736ZM5.87868 5.87868C7.05025 4.70711 8.94975 4.70711 10.1213 5.87868L11.5355 4.46447C9.58291 2.51184 6.41709 2.51184 4.46447 4.46447L5.87868 5.87868Z" />
+          </svg>
+          <!-- Battery -->
+          <div class="battery-pill">
+            <div class="battery-level"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========================================== -->
+      <!-- SCREEN 1: INSTRUCTOR HOME (Figma 40012288:1871) -->
+      <!-- ========================================== -->
+      <section class="screen-view active-screen" id="screenHome">
+        
+        <!-- Blue Instructor Header -->
+        <div class="instructor-header">
+          <div class="header-profile-row">
+            <div class="profile-info-group">
+              <div class="avatar-ring">
+                <img src="/images/instructor/instructor_evelyn.png" alt="Evelyn Miller" class="instructor-avatar" id="homeAvatarImg" />
+              </div>
+              <div class="greeting-column">
+                <h1 class="instructor-greeting" id="homeGreeting">Morning, Evelyn</h1>
+                <div class="location-dropdown" id="btnLocationDropdown">
+                  <img src="/images/instructor/icon_pool.svg" class="icon-loc" alt="Location" />
+                  <span class="location-text" id="homeLocationText">4827 Willow Creek Drive</span>
+                  <img src="/images/instructor/icon_chevron_down.svg" class="icon-chevron" alt="Select" />
+                </div>
+              </div>
+            </div>
+            
+            <button class="notification-btn" id="btnNotification" title="Notifications">
+              <img src="/images/instructor/icon_notification.svg" alt="Notifications" />
+              <span class="notification-badge" id="notificationBadge"></span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Sheet Body -->
+        <div class="sheet-container">
+          
+          <!-- Section 1: Overview -->
+          <div class="content-section">
+            <h2 class="section-title">Overview</h2>
+            <div class="overview-grid">
+              
+              <!-- Upcoming Card -->
+              <div class="overview-card" id="cardUpcoming">
+                <div class="overview-icon-wrap">
+                  <img src="/images/instructor/icon_upcoming.svg" alt="Upcoming" />
+                </div>
+                <div class="overview-meta">
+                  <div class="overview-value" id="valUpcoming">5</div>
+                  <div class="overview-label">Upcoming</div>
+                </div>
+              </div>
+
+              <!-- Completed Card -->
+              <div class="overview-card" id="cardCompleted">
+                <div class="overview-icon-wrap">
+                  <img src="/images/instructor/icon_completed.svg" alt="Completed" />
+                </div>
+                <div class="overview-meta">
+                  <div class="overview-value" id="valCompleted">132</div>
+                  <div class="overview-label">Completed</div>
+                </div>
+              </div>
+
+              <!-- Earned All Time Card -->
+              <div class="overview-card" id="cardEarned">
+                <div class="overview-icon-wrap">
+                  <img src="/images/instructor/icon_dollar.svg" alt="Earned" />
+                </div>
+                <div class="overview-meta">
+                  <div class="overview-value" id="valEarned">$7,412.00</div>
+                  <div class="overview-label">Earned all time</div>
+                </div>
+              </div>
+
+              <!-- Rating & Reviews Card -->
+              <div class="overview-card" id="cardRating">
+                <div class="overview-icon-wrap">
+                  <img src="/images/instructor/icon_star.svg" alt="Rating" />
+                </div>
+                <div class="overview-meta">
+                  <div class="overview-value" id="valRating">4.9</div>
+                  <div class="overview-label" id="valReviews">128 reviews</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Section 2: New Requests -->
+          <div class="content-section" id="sectionNewRequests">
+            <div class="section-header-row">
+              <div class="title-with-badge">
+                <h2 class="section-title">New Requests</h2>
+                <span class="count-pill count-pill-red" id="badgeRequestsCount">2</span>
+              </div>
+              <button class="see-all-link" id="btnSeeAllRequests">See All</button>
+            </div>
+
+            <!-- Request Card (Clickable to jump to Details) -->
+            <div class="request-card" id="requestCardHannah" onclick="handleRequestCardClick(event)">
+              <div class="request-card-header">
+                <div class="client-meta-group">
+                  <img src="/images/instructor/client_hannah.png" alt="Hannah Cooper" class="client-avatar" />
+                  <div class="client-text-block">
+                    <div class="client-name" id="reqClientName">Hannah Cooper</div>
+                    <div class="client-lesson-subtitle" id="reqLessonType">Private lesson · swimmer age 7</div>
+                  </div>
+                </div>
+                <div class="request-price" id="reqPrice">$54.00</div>
+              </div>
+
+              <div class="request-details-list">
+                <div class="detail-row">
+                  <img src="/images/instructor/icon_calendar.svg" class="detail-icon" alt="Date" />
+                  <span class="detail-text" id="reqDateTime">Wed, Aug 5 · 3:00–4:00 PM</span>
+                </div>
+                <div class="detail-row">
+                  <img src="/images/instructor/icon_pool.svg" class="detail-icon" alt="Location" />
+                  <span class="detail-text muted" id="reqLocation">Oak Lawn Aquatic Center</span>
+                </div>
+              </div>
+
+              <div class="expiry-row">
+                <img src="/images/instructor/icon_clock_orange.svg" class="clock-icon" alt="Expiry" />
+                <span class="expiry-text" id="reqExpiresIn">Expires in 4h 12m</span>
+              </div>
+
+              <div class="card-action-row">
+                <button class="btn-decline" id="btnHomeDecline" onclick="handleDecline(event, 'demo-request-1')">Decline</button>
+                <button class="btn-accept" id="btnHomeAccept" onclick="handleAccept(event, 'demo-request-1')">Accept</button>
+              </div>
+            </div>
+
+            <!-- Card Success/Handled Overlay if action completed -->
+            <div class="request-handled-card hidden" id="requestHandledCard">
+              <div class="handled-icon" id="handledIcon">✓</div>
+              <div class="handled-message" id="handledMessage">Booking Request Accepted!</div>
+              <button class="handled-reset-btn" onclick="resetRequestDemo(event)">Reset Demo</button>
+            </div>
+          </div>
+
+          <!-- Section 3: Today -->
+          <div class="content-section">
+            <div class="section-header-row">
+              <h2 class="section-title">Today</h2>
+              <span class="subtitle-badge-blue" id="todayLessonsBadge">2 Lessons</span>
+            </div>
+
+            <div class="today-lessons-card">
+              
+              <!-- Lesson Item 1 -->
+              <div class="lesson-row" id="todayLesson1">
+                <div class="lesson-time-col">
+                  <div class="time-main">10:00</div>
+                  <div class="time-period">AM</div>
+                </div>
+                <div class="lesson-desc-col">
+                  <div class="lesson-name">Private lesson · age 11</div>
+                  <div class="lesson-location">Oak Lawn Community Pool</div>
+                </div>
+                <div class="lesson-badge-col">
+                  <span class="time-status-pill">In 1h</span>
+                </div>
+              </div>
+
+              <!-- Lesson Item 2 -->
+              <div class="lesson-row" id="todayLesson2">
+                <div class="lesson-time-col">
+                  <div class="time-main">03:00</div>
+                  <div class="time-period">PM</div>
+                </div>
+                <div class="lesson-desc-col">
+                  <div class="lesson-name">Private lesson · age 15</div>
+                  <div class="lesson-location">Oak Lawn Community Pool</div>
+                </div>
+                <div class="lesson-badge-col">
+                  <!-- No badge for later lesson -->
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Section 4: Earnings -->
+          <div class="content-section section-earnings">
+            <h2 class="section-title">Earnings</h2>
+            <div class="earnings-card">
+              <div class="earnings-split-row">
+                
+                <div class="earning-stat-col divider-right">
+                  <div class="earning-stat-label">Available</div>
+                  <div class="earning-stat-val val-green" id="valEarningsAvailable">$412.00</div>
+                </div>
+
+                <div class="earning-stat-col">
+                  <div class="earning-stat-label">Pending</div>
+                  <div class="earning-stat-val val-dark" id="valEarningsPending">$174.00</div>
+                </div>
+
+              </div>
+
+              <button class="btn-withdraw" id="btnWithdraw" onclick="handleWithdrawClick()">Withdraw</button>
+            </div>
+          </div>
+
+          <!-- Bottom spacing to prevent floating nav overlap -->
+          <div class="nav-spacer"></div>
+
+        </div>
+
+        <!-- Floating Glassmorphic Navigation Bar (Instructor) -->
+        <nav class="floating-nav-bar" id="instructorNavBar">
+          <div class="nav-glass-bg"></div>
+          
+          <button class="nav-tab-item active" id="navItemHome" onclick="selectNavTab('home')">
+            <div class="tab-highlight"></div>
+            <img src="/images/instructor/nav_home.svg" alt="Home" />
+            <span>Home</span>
+          </button>
+
+          <button class="nav-tab-item" id="navItemBookings" onclick="selectNavTab('bookings')">
+            <div class="tab-highlight"></div>
+            <img src="/images/instructor/nav_bookings.svg" alt="Bookings" />
+            <span>Bookings</span>
+          </button>
+
+          <button class="nav-tab-item" id="navItemEarnings" onclick="selectNavTab('earnings')">
+            <div class="tab-highlight"></div>
+            <img src="/images/instructor/nav_earnings.svg" alt="Earnings" />
+            <span>Earnings</span>
+          </button>
+
+          <button class="nav-tab-item" id="navItemMessage" onclick="selectNavTab('message')">
+            <div class="tab-highlight"></div>
+            <img src="/images/instructor/nav_message.svg" alt="Message" />
+            <span>Message</span>
+          </button>
+
+          <button class="nav-tab-item" id="navItemProfile" onclick="selectNavTab('profile')">
+            <div class="tab-highlight"></div>
+            <img src="/images/instructor/nav_profile.svg" alt="Profile" />
+            <span>Profile</span>
+          </button>
+        </nav>
+
+      </section>
+
+
+      <!-- ========================================== -->
+      <!-- SCREEN 2: BOOKING REQUEST / LESSON DETAILS -->
+      <!-- (Figma 40012321:3120)                       -->
+      <!-- ========================================== -->
+      <section class="screen-view" id="screenDetails">
+        
+        <!-- Header Bar with Back Button & Centered Title -->
+        <div class="details-top-bar">
+          <button class="icon-back-btn" id="btnDetailsBack" onclick="switchScreen('home')" title="Back to Home">
+            <img src="/images/instructor/icon_back.svg" alt="Back" />
+          </button>
+          <h1 class="details-header-title">Lesson details</h1>
+          <div class="top-bar-placeholder"></div>
+        </div>
+
+        <!-- Expiration Alert Banner -->
+        <div class="urgent-expiry-banner">
+          <div class="banner-left-group">
+            <img src="/images/instructor/icon_clock_orange.svg" class="banner-clock-icon" alt="Timer" />
+            <span class="banner-expiry-highlight" id="detailsExpiresIn">Expires in 4h 12m</span>
+          </div>
+          <span class="banner-right-subtext">Auto-declines after</span>
+        </div>
+
+        <!-- Details Scrollable Content Container -->
+        <div class="details-scroll-content">
+          
+          <!-- Date & Pricing Card -->
+          <div class="details-main-card">
+            <div class="card-date-header">
+              <h2 class="lesson-full-date" id="detailsDateTitle">Wed, Aug 5 · 3:00 PM</h2>
+              <div class="lesson-time-duration" id="detailsDateSubtitle">3:00 – 4:00 PM · 60-min private lesson</div>
+            </div>
+
+            <!-- Inset Financial Breakdown Table -->
+            <div class="pricing-breakdown-card">
+              <div class="pricing-row divider-bottom">
+                <span class="pricing-row-label">Parent pays</span>
+                <span class="pricing-row-val bold" id="detailsParentPays">$63.00</span>
+              </div>
+              <div class="pricing-row divider-bottom">
+                <span class="pricing-row-label">Commission (15%)</span>
+                <span class="pricing-row-val val-red" id="detailsCommission">−$9.00</span>
+              </div>
+              <div class="pricing-row payout-row">
+                <span class="pricing-row-label">You receive</span>
+                <span class="pricing-row-val payout-highlight" id="detailsYouReceive">$51.00</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section: Who's Booking -->
+          <div class="details-section">
+            <h3 class="details-section-heading">Who's booking</h3>
+            <div class="details-white-card">
+              
+              <div class="client-profile-header">
+                <img src="/images/instructor/client_hannah.png" alt="Hannah Cooper" class="details-client-avatar" id="detailsClientImg" />
+                <div class="client-meta-stack">
+                  <h4 class="details-client-name" id="detailsClientName">Hannah Cooper</h4>
+                  <div class="rating-strip">
+                    <svg class="gold-star" width="16" height="16" viewBox="0 0 24 24" fill="#E8943F">
+                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                    </svg>
+                    <span class="rating-string" id="detailsClientRating">4.9 · rated by 6 instructors</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3 Horizontal Stats Blocks -->
+              <div class="client-stats-grid">
+                <div class="stat-pill-box">
+                  <div class="stat-pill-num" id="statLessonsBooked">14</div>
+                  <div class="stat-pill-desc">Lessons booked</div>
+                </div>
+                <div class="stat-pill-box">
+                  <div class="stat-pill-num" id="statCancels">0</div>
+                  <div class="stat-pill-desc">Cancels</div>
+                </div>
+                <div class="stat-pill-box">
+                  <div class="stat-pill-num" id="statMemberSince">2y</div>
+                  <div class="stat-pill-desc">Member</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Section: Swimmer -->
+          <div class="details-section">
+            <h3 class="details-section-heading">Swimmer</h3>
+            <div class="details-white-card swimmer-card">
+              
+              <div class="swimmer-data-row divider-bottom">
+                <span class="swimmer-data-label">Swimmer</span>
+                <span class="swimmer-data-val" id="swimmerNameAge">Amira, age 7</span>
+              </div>
+
+              <div class="swimmer-data-row divider-bottom">
+                <span class="swimmer-data-label">Comfort in water</span>
+                <span class="swimmer-data-val" id="swimmerComfort">Nervous Beginner</span>
+              </div>
+
+              <div class="swimmer-note-block">
+                <div class="note-label">Note from parent</div>
+                <div class="note-body" id="swimmerParentNotes">
+                  "She's nervous about putting his face in the water. We've tried group lessons before and she froze up."
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Section: Where -->
+          <div class="details-section">
+            <h3 class="details-section-heading">Where</h3>
+            <div class="details-white-card location-card">
+              <div class="map-preview-wrap">
+                <img src="/images/instructor/map_preview.png" alt="Map Location" class="map-image" id="mapPreviewImg" />
+              </div>
+              <div class="location-details-wrap">
+                <h4 class="pool-title" id="locationPoolName">Oak Lawn Community Pool</h4>
+                <p class="pool-address-line" id="locationFullDetails">
+                  3418 Cedar Springs Rd, Dallas, TX 75219 · Indoor, heated to 86°F · Free parking on site
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section: Schedule Conflict Check -->
+          <div class="details-section section-conflict">
+            <div class="schedule-check-card" id="scheduleConflictCard">
+              <div class="check-icon-circle">
+                <img src="/images/instructor/icon_schedule_check.svg" alt="Conflict Check" id="conflictCheckIcon" />
+              </div>
+              <div class="conflict-text-group">
+                <div class="conflict-title" id="conflictTitle">No schedule conflict</div>
+                <div class="conflict-subtext" id="conflictSubtext">Your next lesson that day ends 1:00 PM</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Footer spacing -->
+          <div class="details-footer-spacer"></div>
+
+        </div>
+
+        <!-- Fixed Bottom Action Bar -->
+        <div class="fixed-actions-bar" id="fixedActionsBar">
+          <button class="btn-decline-large" id="btnDetailsDecline" onclick="handleDecline(event, 'demo-request-1')">
+            <span>Decline</span>
+          </button>
+          <button class="btn-accept-large" id="btnDetailsAccept" onclick="handleAccept(event, 'demo-request-1')">
+            <span>Accept</span>
+          </button>
+        </div>
+
+      </section>
+
+      <!-- Home Indicator bar -->
+      <div class="home-indicator"></div>
+
+    </div>
+  </main>
+
+  <!-- Notification Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Interactive Withdraw Modal -->
+  <div class="modal-overlay hidden" id="withdrawModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">Withdraw Earnings</h3>
+        <button class="modal-close-btn" onclick="closeWithdrawModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-stat-pill">
+          <span>Available to Withdraw:</span>
+          <strong id="modalAvailableVal">$412.00</strong>
+        </div>
+        <div class="modal-input-group">
+          <label for="withdrawAmount">Amount ($)</label>
+          <input type="number" id="withdrawAmount" value="412.00" min="10" step="10" />
+        </div>
+        <div class="modal-input-group">
+          <label>Payout Destination</label>
+          <div class="bank-pill">
+            <span class="bank-icon">🏦</span>
+            <span>Chase Bank ···· 4821</span>
+            <span class="default-badge">Default</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal-cancel" onclick="closeWithdrawModal()">Cancel</button>
+        <button class="btn-modal-confirm" onclick="confirmWithdraw()">Confirm Transfer</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

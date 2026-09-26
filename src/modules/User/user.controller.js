@@ -16,6 +16,7 @@ const {
   togglePushNotificationService,
   getPushNotificationService,
   getUserHomeFeedService,
+  getInstructorHomeFeedService,
   updateUserLocationService,
   getAdminClientsListService,
   getAdminClientDetailsService,
@@ -280,6 +281,20 @@ const deleteFcmTokenController = catchAsync(async (req, res) => {
 
 // Instructors List (Top Rated Instructors Near You - Figma 40010003:11)
 const getUserHomeController = catchAsync(async (req, res) => {
+  if (req.User?.role === 'instructor' || req.query.role === 'instructor') {
+    const instructorId = req.User ? req.User._id : (req.query.instructorId || null);
+    const result = await getInstructorHomeFeedService(instructorId, req.query);
+    return res.status(status.OK).json(
+      response({
+        status: 'OK',
+        statusCode: status.OK,
+        type: 'InstructorHomeFeed',
+        message: 'Instructor home feed fetched successfully',
+        data: result
+      })
+    );
+  }
+
   const userId = req.User ? req.User._id : null;
   const result = await getUserHomeFeedService(userId, req.query);
   return res.status(status.OK).json(
@@ -288,6 +303,21 @@ const getUserHomeController = catchAsync(async (req, res) => {
       statusCode: status.OK,
       type: 'HomeFeed',
       message: 'Home feed fetched successfully',
+      data: result
+    })
+  );
+});
+
+// Instructor Home / Dashboard (Figma 40012288:1871)
+const getInstructorHomeController = catchAsync(async (req, res) => {
+  const instructorId = req.query.instructorId || (req.User ? req.User._id : null);
+  const result = await getInstructorHomeFeedService(instructorId, req.query);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      type: 'InstructorHomeFeed',
+      message: 'Instructor home feed fetched successfully',
       data: result
     })
   );
@@ -438,6 +468,7 @@ module.exports = {
   togglePushNotificationController,
   getPushNotificationController,
   getUserHomeController,
+  getInstructorHomeController,
   updateUserLocationController,
   getAdminClientsListController,
   getAdminClientDetailsController,

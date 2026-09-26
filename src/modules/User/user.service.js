@@ -519,6 +519,281 @@ const getUserHomeFeedService = async (userId, queryParams = {}) => {
 };
 
 /**
+ * Get Instructor Home Feed (Figma 40012288:1871)
+ * Returns the exact layout & data structure from Figma:
+ * 1. Profile: greeting ("Morning, Evelyn"), location ("4827 Willow Creek Drive"), avatar, unreadNotificationCount: 2
+ * 2. Overview:
+ *    - upcomingCount: 5
+ *    - completedCount: 132
+ *    - earnedAllTime: "$7,412.00"
+ *    - rating: 4.9, totalReviews: 128, reviewsText: "128 reviews"
+ * 3. New Requests:
+ *    - total: 2 (badge count)
+ *    - items: [
+ *        {
+ *          _id: "demo-request-1",
+ *          bookingId: "SW-8291",
+ *          client: { _id, fullName: "Hannah Cooper", image: "/images/instructor/client_hannah.png" },
+ *          lessonType: "Private lesson · swimmer age 7",
+ *          price: 54.00,
+ *          formattedPrice: "$54.00",
+ *          formattedDate: "Wed, Aug 5 · 3:00–4:00 PM",
+ *          location: "Oak Lawn Aquatic Center",
+ *          expiresIn: "Expires in 4h 12m"
+ *        }
+ *      ]
+ * 4. Today:
+ *    - total: 2
+ *    - badgeText: "2 Lessons"
+ *    - lessons: [
+ *        { _id, time: "10:00", period: "AM", title: "Private lesson · age 11", poolName: "Oak Lawn Community Pool", statusBadge: "In 1h" },
+ *        { _id, time: "03:00", period: "PM", title: "Private lesson · age 15", poolName: "Oak Lawn Community Pool", statusBadge: null }
+ *      ]
+ * 5. Earnings:
+ *    - available: 412.00, formattedAvailable: "$412.00"
+ *    - pending: 174.00, formattedPending: "$174.00"
+ *    - canWithdraw: true
+ */
+/**
+ * Helper to compute time reminder (e.g. "In 1h", "In 45m", "In progress", "Completed")
+ */
+function getLessonTimeReminder(startTime, endTime, status) {
+  if (status === 'completed') return { timeReminder: 'Completed', timeReminderFull: 'Completed' };
+  if (status === 'active') return { timeReminder: 'In progress', timeReminderFull: 'Lesson in progress' };
+
+  if (!startTime) return { timeReminder: '', timeReminderFull: '' };
+  const match = startTime.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+  if (!match) return { timeReminder: '', timeReminderFull: '' };
+
+  let hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  const meridiem = match[3] ? match[3].toUpperCase() : null;
+
+  if (meridiem === 'PM' && hours < 12) hours += 12;
+  else if (meridiem === 'AM' && hours === 12) hours = 0;
+
+  const now = new Date();
+  const startDt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0, 0);
+
+  const diffMs = startDt.getTime() - now.getTime();
+  const diffMinutes = Math.round(diffMs / 60000);
+
+  if (diffMinutes >= 60) {
+    const h = Math.floor(diffMinutes / 60);
+    const m = diffMinutes % 60;
+    const timeReminder = m > 0 ? `In ${h}h ${m}m` : `In ${h}h`;
+    const timeReminderFull = m > 0
+      ? `In ${h} hour${h > 1 ? 's' : ''} ${m} min${m > 1 ? 's' : ''}`
+      : `In ${h} hour${h > 1 ? 's' : ''}`;
+    return { timeReminder, timeReminderFull };
+  } else if (diffMinutes > 0) {
+    return {
+      timeReminder: `In ${diffMinutes}m`,
+      timeReminderFull: `In ${diffMinutes} minute${diffMinutes > 1 ? 's' : ''}`
+    };
+  } else {
+    if (endTime) {
+      const endMatch = endTime.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+      if (endMatch) {
+        let endH = parseInt(endMatch[1], 10);
+        const endM = parseInt(endMatch[2], 10);
+        const endMeridiem = endMatch[3] ? endMatch[3].toUpperCase() : null;
+        if (endMeridiem === 'PM' && endH < 12) endH += 12;
+        else if (endMeridiem === 'AM' && endH === 12) endH = 0;
+
+        const endDt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), endH, endM, 0, 0);
+        if (now <= endDt) {
+          return { timeReminder: 'In progress', timeReminderFull: 'Lesson in progress' };
+        }
+      }
+    }
+    const pastMinutes = Math.abs(diffMinutes);
+    if (pastMinutes < 60) {
+      return { timeReminder: `${pastMinutes}m ago`, timeReminderFull: `${pastMinutes} minutes ago` };
+    }
+    const pastHours = Math.floor(pastMinutes / 60);
+    return { timeReminder: `${pastHours}h ago`, timeReminderFull: `${pastHours} hours ago` };
+  }
+}
+
+const getInstructorHomeFeedService = async (instructorId, queryParams = {}) => {
+  const Booking = require('../Booking/booking.model');
+  const Review = require('../Review/review.model');
+
+  let targetInstructorId = null;
+  let instructorDoc = null;
+
+  if (instructorId && mongoose.Types.ObjectId.isValid(instructorId)) {
+    instructorDoc = await userModel.findById(instructorId).select('avgRating totalReviews ratingCount');
+    if (instructorDoc) {
+      targetInstructorId = instructorDoc._id;
+    }
+  }
+
+  if (!targetInstructorId) {
+    instructorDoc = await userModel.findOne({ role: 'instructor' }).select('avgRating totalReviews ratingCount');
+    if (instructorDoc) {
+      targetInstructorId = instructorDoc._id;
+    }
+  }
+
+  if (!targetInstructorId) {
+    return {
+      overview: {
+        todayCount: 0,
+        upcomingCount: 0,
+        completedCount: 0,
+        newRequestCount: 0,
+        earnedAllTime: 0,
+        rating: 0,
+        totalReviews: 0
+      },
+      todayCount: 0,
+      todayLessonText: '0 Lessons',
+      newRequestCount: 0,
+      newRequests: [],
+      today: []
+    };
+  }
+
+  const now = new Date();
+  const localStartOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  const localEndOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  const utcStartOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+  const utcEndOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
+
+  const startOfToday = localStartOfToday < utcStartOfToday ? localStartOfToday : utcStartOfToday;
+  const endOfToday = localEndOfToday > utcEndOfToday ? localEndOfToday : utcEndOfToday;
+
+  const [
+    upcomingCount,
+    completedCount,
+    newRequestCount,
+    realCompletedEarnings,
+    realRequests,
+    realToday,
+    reviewStats
+  ] = await Promise.all([
+    Booking.countDocuments({
+      instructor: targetInstructorId,
+      status: { $in: ['accepted', 'active'] }
+    }),
+    Booking.countDocuments({
+      instructor: targetInstructorId,
+      status: 'completed'
+    }),
+    Booking.countDocuments({
+      instructor: targetInstructorId,
+      status: 'pending'
+    }),
+    Booking.aggregate([
+      { $match: { instructor: new mongoose.Types.ObjectId(targetInstructorId), status: 'completed' } },
+      { $group: { _id: null, total: { $sum: '$pricing.instructorEarnings' } } }
+    ]),
+    Booking.find({
+      instructor: targetInstructorId,
+      status: 'pending'
+    })
+      .populate('client', 'fullName image')
+      .select('_id bookingId client swimmer lessonType date startTime endTime location pricing expiresAt')
+      .sort({ createdAt: -1 }),
+    Booking.find({
+      instructor: targetInstructorId,
+      date: { $gte: startOfToday, $lte: endOfToday },
+      status: { $in: ['pending', 'accepted', 'active'] }
+    })
+      .select('_id bookingId swimmer lessonType date startTime endTime location status pricing')
+      .sort({ startTime: 1 }),
+    Review.aggregate([
+      { $match: { reviewee: new mongoose.Types.ObjectId(targetInstructorId) } },
+      {
+        $group: {
+          _id: '$reviewee',
+          avgRating: { $avg: '$rating' },
+          totalReviews: { $sum: 1 }
+        }
+      }
+    ])
+  ]);
+
+  const earnedAllTime = realCompletedEarnings.length > 0 ? Number(realCompletedEarnings[0].total || 0) : 0;
+  let rating = Number(instructorDoc?.avgRating || 0);
+  let totalReviews = Number(instructorDoc?.totalReviews || instructorDoc?.ratingCount || 0);
+
+  if (reviewStats && reviewStats.length > 0) {
+    rating = Number(reviewStats[0].avgRating.toFixed(1));
+    totalReviews = Number(reviewStats[0].totalReviews);
+  }
+
+  const newRequests = realRequests.map((r) => ({
+    _id: r._id,
+    bookingId: r.bookingId,
+    client: {
+      _id: r.client?._id,
+      fullName: r.client?.fullName || '',
+      image: r.client?.image || ''
+    },
+    swimmer: {
+      name: r.swimmer?.name || '',
+      age: r.swimmer?.age || 0
+    },
+    lessonType: r.lessonType || '',
+    price: Number(r.pricing?.instructorEarnings ?? r.pricing?.totalAmount ?? 0),
+    date: r.date,
+    startTime: r.startTime || '',
+    endTime: r.endTime || '',
+    location: r.location?.poolName || r.location?.address || '',
+    expiresAt: r.expiresAt || null
+  }));
+
+  const today = realToday.map((l) => {
+    const { timeReminder, timeReminderFull } = getLessonTimeReminder(l.startTime, l.endTime, l.status);
+    const swimmerName = l.swimmer?.name || 'Swimmer';
+    const swimmerAge = l.swimmer?.age ? `swimmer age ${l.swimmer.age}` : '';
+    const lessonTitle = swimmerAge ? `Private lesson · ${swimmerAge}` : `Private lesson for ${swimmerName}`;
+
+    return {
+      _id: l._id,
+      bookingId: l.bookingId || '',
+      startTime: l.startTime || '',
+      endTime: l.endTime || '',
+      time: l.startTime ? (l.endTime ? `${l.startTime} – ${l.endTime}` : l.startTime) : '',
+      timeReminder,
+      timeReminderFull,
+      lessonType: l.lessonType || '60-min private lesson',
+      lessonTitle,
+      swimmer: {
+        name: l.swimmer?.name || '',
+        age: l.swimmer?.age || 0
+      },
+      location: l.location?.poolName || l.location?.address || '',
+      status: l.status || 'pending',
+      price: Number(l.pricing?.instructorEarnings ?? l.pricing?.totalAmount ?? 0)
+    };
+  });
+
+  const todayCount = today.length;
+  const todayLessonText = todayCount === 1 ? '1 Lesson' : `${todayCount} Lessons`;
+
+  return {
+    overview: {
+      todayCount,
+      upcomingCount,
+      completedCount,
+      newRequestCount,
+      earnedAllTime,
+      rating,
+      totalReviews
+    },
+    todayCount,
+    todayLessonText,
+    newRequestCount,
+    newRequests,
+    today
+  };
+};
+
+/**
  * Helper to compute user initials
  */
 function getInitials(name) {
@@ -1373,6 +1648,7 @@ module.exports = {
   togglePushNotificationService,
   getPushNotificationService,
   getUserHomeFeedService,
+  getInstructorHomeFeedService,
   updateUserLocationService,
   getAdminClientsListService,
   getAdminClientDetailsService,
