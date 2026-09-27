@@ -1,84 +1,114 @@
 const catchAsync = require('../../helpers/catchAsync');
+const response = require('../../helpers/response');
+const { status } = require('http-status');
 const {
   createReportService,
-  getAdminDisputesService,
+  getAdminDisputesListService,
   getAdminDisputeDetailsService,
-  resolveDisputeService,
+  adminResolveDisputeService,
   getMyReportsService
 } = require('./report.service');
-const response = require('../../helpers/response');
-const { default: status } = require('http-status');
 
-const createReportController = catchAsync(async (req, res) => {
-  const files = req.files || (req.file ? [req.file] : []);
-  const result = await createReportService(req.User._id, req.body, files);
+// 1. File a report / dispute on a lesson (Figma 40012392:3369)
+const createReport = catchAsync(async (req, res) => {
+  let bodyData = req.body || {};
+  if (bodyData && bodyData.data) {
+    if (typeof bodyData.data === 'string') {
+      try {
+        bodyData = JSON.parse(bodyData.data);
+      } catch (e) {
+        // keep bodyData
+      }
+    } else if (typeof bodyData.data === 'object' && bodyData.data !== null) {
+      bodyData = bodyData.data;
+    }
+  }
+
+  const userId = req.User?._id || bodyData.userId;
+  const userRole = req.User?.role || bodyData.role || 'user';
+  const files = req.files || req.file;
+
+  const result = await createReportService(userId, userRole, bodyData, files);
+
   return res.status(status.CREATED).json(
     response({
       status: 'OK',
       statusCode: status.CREATED,
-      type: 'Report',
-      message: 'Report submitted successfully',
+      type: 'DisputeReport',
+      message: 'Report submitted successfully. Our team will review this booking.',
       data: result
     })
   );
 });
 
-const getAdminDisputesController = catchAsync(async (req, res) => {
-  const result = await getAdminDisputesService(req.query);
+// 2. Admin: Get Disputes List with tab counts (Figma 40012554:20231)
+const getAdminDisputesList = catchAsync(async (req, res) => {
+  const result = await getAdminDisputesListService(req.query);
+
   return res.status(status.OK).json(
     response({
       status: 'OK',
       statusCode: status.OK,
-      type: 'Disputes',
-      message: 'Disputes fetched successfully',
+      type: 'AdminDisputes',
+      message: 'Admin disputes list fetched successfully',
       data: result
     })
   );
 });
 
-const getAdminDisputeDetailsController = catchAsync(async (req, res) => {
-  const result = await getAdminDisputeDetailsService(req.params.id);
+// 3. Admin: Get Dispute Details for Drawer (Figma 40012554:20832)
+const getAdminDisputeDetails = catchAsync(async (req, res) => {
+  const disputeId = req.params.id;
+  const result = await getAdminDisputeDetailsService(disputeId);
+
   return res.status(status.OK).json(
     response({
       status: 'OK',
       statusCode: status.OK,
-      type: 'Dispute',
+      type: 'AdminDisputeDetails',
       message: 'Dispute details fetched successfully',
       data: result
     })
   );
 });
 
-const resolveDisputeController = catchAsync(async (req, res) => {
-  const result = await resolveDisputeService(req.params.id, req.User._id, req.body);
+// 4. Admin: Resolve or Dismiss a dispute
+const resolveDispute = catchAsync(async (req, res) => {
+  const disputeId = req.params.id;
+  const adminId = req.User?._id;
+  const result = await adminResolveDisputeService(disputeId, adminId, req.body);
+
   return res.status(status.OK).json(
     response({
       status: 'OK',
       statusCode: status.OK,
-      type: 'Dispute',
-      message: `Dispute ${result.status} successfully`,
+      type: 'DisputeResolution',
+      message: 'Dispute updated successfully',
       data: result
     })
   );
 });
 
-const getMyReportsController = catchAsync(async (req, res) => {
-  const result = await getMyReportsService(req.User._id, req.query);
+// 5. My Reports (Client or Instructor)
+const getMyReports = catchAsync(async (req, res) => {
+  const userId = req.User?._id;
+  const result = await getMyReportsService(userId, req.query);
+
   return res.status(status.OK).json(
     response({
       status: 'OK',
       statusCode: status.OK,
-      type: 'Reports',
-      message: 'User reports fetched successfully',
+      type: 'MyReports',
+      message: 'My reports fetched successfully',
       data: result
     })
   );
 });
 
 module.exports = {
-  createReportController,
-  getAdminDisputesController,
-  getAdminDisputeDetailsController,
-  resolveDisputeController,
-  getMyReportsController
-};
+  createReport,
+  getAdminDisputesList,
+  getAdminDisputeDetails,
+  resolveDispute,
+  getMyReports
+};

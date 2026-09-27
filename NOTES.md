@@ -33,7 +33,7 @@
 - **Swimmer Profile**: Managed within `src/modules/Booking/booking.model.js` (`swimmerSchema` - name, age, comfort level, medical/fears notes).
 - **Waiver Agreement**: Managed within `src/modules/Booking/booking.model.js` (`waiverAgreementSchema` - digital signature, legal name, relationship, agreement timestamp).
 - **Pools & Locations**: Defined in `src/modules/ServiceAndPricing/serviceAndPricing.model.js` (`publicPoolSchema`, `ownPool`, `travelToClient`) and snapshot in `Booking`.
-- **Disputes**: Handled directly in `src/modules/Report/` with routes mapped to `/api/v1/report`, `/api/v1/reports`, and `/api/v1/disputes`.
+- **Disputes & Reports**: Handled directly in `src/modules/Report/` (`report.model.js`, `report.service.js`, `report.controller.js`, `report.route.js`) with routes mapped to `/api/v1/report`, `/api/v1/reports`, and `/api/v1/disputes`. Follows the codebase standard: text fields bundled in `data` (JSON string/object) with file attachments (`image`/`photo`) passed separately. Admin disputes query (`GET /api/v1/disputes/admin`) is strictly read-only and returns only the exact columns displayed in the Figma table (`40012554:20231` - `bookingId`, `client`, `instructor`, `date`, `status`, `reason`), with full details (`amount`, `details`, `photos`, `resolution`) returned via drawer API (`GET /api/v1/disputes/admin/:id` - `40012554:20832`). Mobile "Report an issue" sheet (`40012392:3369`) served at `/instructor` and Admin Disputes portal & drawer served at `/admin`.
 - **Realtime Notifications & Socket**: Configured in `src/socket/` with `socketNotification.js` and `socketIO.js`.
 
 ---

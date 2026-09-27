@@ -97,11 +97,17 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
 // Routes
 app.use("/api/v1", routes);
 
-// Instructor UI Pages (Figma 40012288:1871 & 40012321:3120)
+// Instructor UI Pages (Figma 40012288:1871, 40012321:3120, 40012392:3369)
 const path = require("path");
 app.get("/instructor", (req, res) => {
   res.sendFile(path.join(__dirname, "../public/instructor/index.html"));
 });
+
+// Admin UI Pages - Disputes & Details (Figma 40012554:20231 & 40012554:20832)
+app.get(["/admin", "/admin/disputes", "/admin/disputes/*"], (req, res) => {
+  res.sendFile(path.join(__dirname, "../public/admin/index.html"));
+});
+
 
 // Health check + log viewer
 app.get("/", (req, res) => {

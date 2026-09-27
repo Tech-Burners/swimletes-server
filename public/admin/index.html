@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Swimletes Admin - Disputes</title>
+
+  <!-- Modern Google Font: Inter Tight (matching Figma typography) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/admin/style.css" />
+</head>
+<body>
+
+  <!-- Top Presentation Navigation Bar -->
+  <header class="admin-top-control-bar">
+    <div class="control-left">
+      <div class="brand-chip">
+        <span class="pulse-dot"></span>
+        <span class="brand-name">SWIMLETES ADMIN</span>
+        <span class="figma-sync-badge">Figma 40012554:20231 & 20832</span>
+      </div>
+    </div>
+
+    <div class="control-center">
+      <span class="page-current-label">Disputes Management Portal</span>
+    </div>
+
+    <div class="control-right">
+      <a href="/instructor" class="btn-instructor-switch" target="_blank" title="Open Mobile Instructor View">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="5" y="2" width="14" height="20" rx="3"></rect>
+          <line x1="12" y1="18" x2="12.01" y2="18"></line>
+        </svg>
+        <span>Instructor App View (40012392:3369)</span>
+      </a>
+      <div class="api-status-chip">
+        <span class="status-indicator-green"></span>
+        <span id="apiStatusText">Live API</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Admin Layout Wrapper -->
+  <div class="admin-layout-container">
+
+    <!-- ============================================== -->
+    <!-- LEFT SIDEBAR (Figma 40012554:20235)            -->
+    <!-- ============================================== -->
+    <aside class="admin-sidebar" id="adminSidebar">
+      
+      <!-- Brand Logo Header -->
+      <div class="sidebar-logo-header">
+        <img src="/images/admin/swimletes_logo.png" alt="Swimletes" class="sidebar-logo-img" />
+      </div>
+
+      <!-- Navigation Menu Items -->
+      <nav class="sidebar-nav">
+        
+        <!-- Overview -->
+        <a href="#overview" class="nav-item" data-route="overview">
+          <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+            <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+            <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+            <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+          </svg>
+          <span class="nav-label">Overview</span>
+        </a>
+
+        <!-- Users (Expandable) -->
+        <div class="nav-group">
+          <button class="nav-item nav-item-expandable" onclick="toggleNavGroup('usersGroup')">
+            <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9" cy="7" r="4"></circle>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+            </svg>
+            <span class="nav-label">Users</span>
+            <svg class="chevron-icon" id="usersGroupChevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+          <div class="nav-sub-items" id="usersGroup">
+            <a href="#clients" class="nav-sub-item">Clients</a>
+            <a href="#instructors" class="nav-sub-item">Instructors</a>
+          </div>
+        </div>
+
+        <!-- Bookings -->
+        <a href="#bookings" class="nav-item" data-route="bookings">
+          <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="16" y1="2" x2="16" y2="6"></line>
+            <line x1="8" y1="2" x2="8" y2="6"></line>
+            <line x1="3" y1="10" x2="21" y2="10"></line>
+          </svg>
+          <span class="nav-label">Bookings</span>
+        </a>
+
+        <!-- Verification Queue -->
+        <a href="#verification" class="nav-item" data-route="verification">
+          <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            <polyline points="9 12 11 14 15 10"></polyline>
+          </svg>
+          <span class="nav-label">Verification Queue</span>
+        </a>
+
+        <!-- Disputes (ACTIVE SCREEN) -->
+        <a href="#disputes" class="nav-item active" data-route="disputes">
+          <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <span class="nav-label">Disputes</span>
+        </a>
+
+        <!-- Refund -->
+        <a href="#refund" class="nav-item" data-route="refund">
+          <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="1 4 1 10 7 10"></polyline>
+            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+          </svg>
+          <span class="nav-label">Refund</span>
+        </a>
+
+        <!-- Withdraw (Expandable) -->
+        <div class="nav-group">
+          <button class="nav-item nav-item-expandable" onclick="toggleNavGroup('withdrawGroup')">
+            <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+              <line x1="6" y1="12" x2="18" y2="12"></line>
+              <polyline points="12 16 16 12 12 8"></polyline>
+            </svg>
+            <span class="nav-label">Withdraw</span>
+            <svg class="chevron-icon" id="withdrawGroupChevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+          <div class="nav-sub-items" id="withdrawGroup">
+            <a href="#withdraw-pending" class="nav-sub-item">Pending</a>
+            <a href="#withdraw-history" class="nav-sub-item">History</a>
+          </div>
+        </div>
+
+        <!-- Earnings -->
+        <a href="#earnings" class="nav-item" data-route="earnings">
+          <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="1" x2="12" y2="23"></line>
+            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+          </svg>
+          <span class="nav-label">Earnings</span>
+        </a>
+
+        <!-- Profile Settings -->
+        <a href="#profile" class="nav-item" data-route="profile">
+          <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+          </svg>
+          <span class="nav-label">Profile Settings</span>
+        </a>
+
+      </nav>
+
+      <!-- Sidebar Bottom Admin Profile -->
+      <div class="sidebar-user-footer">
+        <div class="user-avatar-circle">
+          <span>S</span>
+        </div>
+        <div class="user-info-stack">
+          <span class="user-name">Samantha</span>
+          <span class="user-role-badge">Admin</span>
+        </div>
+      </div>
+
+    </aside>
+
+
+    <!-- ============================================== -->
+    <!-- MAIN CONTENT COLUMN (Figma 40012554:20355)     -->
+    <!-- ============================================== -->
+    <div class="admin-main-column">
+
+      <!-- Top Header Bar (Figma 40012554:20356) -->
+      <header class="admin-topbar">
+        <div class="topbar-spacer"></div>
+
+        <!-- Notification Bell -->
+        <button class="topbar-bell-btn" id="btnNotification" title="Notifications">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+          </svg>
+          <span class="bell-red-dot"></span>
+        </button>
+
+        <!-- Admin Profile Pill -->
+        <div class="topbar-profile-pill">
+          <div class="profile-text-right">
+            <span class="topbar-profile-name">Samantha Archer</span>
+            <span class="topbar-profile-sub">Admin</span>
+          </div>
+          <div class="topbar-avatar-circle">
+            <span>S</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Page Header (Figma 40012554:20375) -->
+      <div class="page-title-banner">
+        <div class="breadcrumbs-row">
+          <span class="breadcrumb-item">Overview</span>
+          <span class="breadcrumb-slash">/</span>
+          <span class="breadcrumb-active">Disputes</span>
+        </div>
+        <h1 class="page-title-text">Disputes</h1>
+        <p class="page-subtitle-text">Review and resolve booking disputes</p>
+      </div>
+
+      <!-- Main Disputes Section Area (Figma 40012554:20395) -->
+      <main class="page-body-container">
+        
+        <!-- Filter Tabs & Search Bar Row (Figma 40012554:20397) -->
+        <div class="controls-toolbar">
+          
+          <!-- Filter Tabs -->
+          <div class="filter-tabs-group" id="filterTabs">
+            <button class="filter-tab-btn active" id="tabOpen" onclick="setDisputeFilter('open')">
+              <span>Open</span>
+              <span class="tab-badge-pill tab-badge-blue" id="countOpen">2</span>
+            </button>
+            <button class="filter-tab-btn" id="tabResolved" onclick="setDisputeFilter('resolved')">
+              <span>Resolved</span>
+              <span class="tab-badge-pill tab-badge-gray" id="countResolved">1</span>
+            </button>
+            <button class="filter-tab-btn" id="tabAll" onclick="setDisputeFilter('all')">
+              <span>All</span>
+              <span class="tab-badge-pill tab-badge-gray" id="countAll">3</span>
+            </button>
+          </div>
+
+          <!-- Search Input -->
+          <div class="search-input-wrap">
+            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input
+              type="text"
+              id="disputeSearchInput"
+              class="search-text-field"
+              placeholder="Search booking, client, instructor…"
+              oninput="handleSearchInput(event)"
+            />
+          </div>
+
+        </div>
+
+        <!-- Table Card Container (Figma 40012554:20424) -->
+        <div class="table-card">
+          <div class="table-responsive-wrapper">
+            <table class="disputes-table" id="disputesTable">
+              <thead>
+                <tr>
+                  <th class="col-booking">BOOKING ID</th>
+                  <th class="col-client">CLIENT</th>
+                  <th class="col-instructor">INSTRUCTOR</th>
+                  <th class="col-date sortable" onclick="toggleDateSort()">
+                    <div class="th-content">
+                      <span>DATE</span>
+                      <svg class="sort-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="7 15 12 20 17 15"></polyline>
+                        <polyline points="7 9 12 4 17 9"></polyline>
+                      </svg>
+                    </div>
+                  </th>
+                  <th class="col-status">STATUS</th>
+                  <th class="col-reason">REASON</th>
+                  <th class="col-actions">ACTIONS</th>
+                </tr>
+              </thead>
+              <tbody id="disputesTableBody">
+                <!-- Dynamically populated or skeleton fallback -->
+                <tr class="loading-row">
+                  <td colspan="7" class="loading-cell">
+                    <div class="table-spinner"></div>
+                    <span>Loading booking disputes…</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Empty State -->
+          <div class="empty-state-card hidden" id="emptyStateCard">
+            <div class="empty-icon-circle">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+              </svg>
+            </div>
+            <h4 class="empty-title">No disputes found</h4>
+            <p class="empty-desc">No dispute records match your current filter or search criteria.</p>
+          </div>
+        </div>
+
+      </main>
+
+    </div>
+
+    <!-- ============================================== -->
+    <!-- DISPUTE DETAILS DRAWER (Figma 40012554:20832)  -->
+    <!-- ============================================== -->
+    <div class="drawer-backdrop hidden" id="drawerBackdrop" onclick="closeDisputeDrawer()"></div>
+
+    <aside class="dispute-drawer hidden" id="disputeDrawer">
+      
+      <!-- Drawer Header -->
+      <div class="drawer-header">
+        <h3 class="drawer-title" id="drawerBookingTitle">Dispute: BK-88214</h3>
+        <button class="drawer-close-btn" onclick="closeDisputeDrawer()" title="Close details">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Drawer Scrollable Content -->
+      <div class="drawer-body">
+        
+        <!-- Status Badge -->
+        <div class="drawer-status-wrap">
+          <span class="drawer-status-badge badge-open" id="drawerStatusBadge">Open</span>
+        </div>
+
+        <!-- Client & Instructor Two-Column Party Block -->
+        <div class="drawer-parties-grid">
+          
+          <!-- Client Column -->
+          <div class="party-col">
+            <div class="party-label">CLIENT</div>
+            <div class="party-user-row">
+              <div class="party-avatar avatar-red" id="drawerClientAvatar">RP</div>
+              <div class="party-meta">
+                <span class="party-name" id="drawerClientName">Ronald Patel</span>
+                <span class="party-sub" id="drawerClientEmail">Client</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Instructor Column -->
+          <div class="party-col">
+            <div class="party-label">INSTRUCTOR</div>
+            <div class="party-user-row">
+              <div class="party-avatar avatar-slate" id="drawerInstructorAvatar">DA</div>
+              <div class="party-meta">
+                <span class="party-name" id="drawerInstructorName">Diego Alvarez</span>
+                <span class="party-sub" id="drawerInstructorEmail">Instructor</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Field Rows Strip -->
+        <div class="drawer-fields-list">
+          
+          <!-- Booking ID -->
+          <div class="field-item-row">
+            <span class="field-item-label">BOOKING ID</span>
+            <span class="field-item-val bold-val" id="drawerFieldBookingId">BK-88214</span>
+          </div>
+
+          <!-- Date -->
+          <div class="field-item-row">
+            <span class="field-item-label">DATE</span>
+            <span class="field-item-val" id="drawerFieldDate">Aug 5, 2026</span>
+          </div>
+
+          <!-- Amount -->
+          <div class="field-item-row">
+            <span class="field-item-label">AMOUNT</span>
+            <span class="field-item-val bold-val" id="drawerFieldAmount">$45</span>
+          </div>
+
+          <!-- Flagged Reason -->
+          <div class="field-item-row">
+            <span class="field-item-label">FLAGGED REASON</span>
+            <span class="field-item-val" id="drawerFieldReason">Session cancelled last minute</span>
+          </div>
+
+        </div>
+
+        <!-- Details Section -->
+        <div class="drawer-section">
+          <div class="section-micro-label">DETAILS</div>
+          <div class="details-quote-box">
+            <p class="details-quote-text" id="drawerFieldDetails">
+              Instructor cancelled two hours before the scheduled lesson with no real explanation.
+            </p>
+          </div>
+        </div>
+
+        <!-- Photo Section -->
+        <div class="drawer-section">
+          <div class="section-micro-label">PHOTO</div>
+          <div class="photo-container-box" id="drawerPhotoWrap">
+            <span class="no-photo-text" id="drawerNoPhotoText">No photo attached.</span>
+            <img src="" alt="Dispute evidence photo" class="evidence-photo hidden" id="drawerEvidencePhoto" onclick="openPhotoLightbox(this.src)" />
+          </div>
+        </div>
+
+        <!-- Resolution Note (Shown if resolved) -->
+        <div class="drawer-section hidden" id="drawerResolutionSection">
+          <div class="section-micro-label">RESOLUTION</div>
+          <div class="resolution-summary-box">
+            <span class="resolution-action" id="drawerResolutionAction">Resolved - No Action</span>
+            <p class="resolution-note" id="drawerResolutionNotes"></p>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Drawer Action Buttons Footer -->
+      <div class="drawer-footer" id="drawerFooter">
+        <button class="btn-drawer-dismiss" id="btnDrawerDismiss" onclick="handleDrawerAction('dismiss')">
+          <span>Dismiss</span>
+        </button>
+        <button class="btn-drawer-resolve" id="btnDrawerResolve" onclick="handleDrawerAction('resolve_no_action')">
+          <span>Resolve – No Action</span>
+        </button>
+      </div>
+
+    </aside>
+
+  </div>
+
+  <!-- Fullscreen Image Lightbox Modal -->
+  <div class="lightbox-modal hidden" id="lightboxModal" onclick="closePhotoLightbox()">
+    <button class="lightbox-close">✕</button>
+    <img src="" id="lightboxImg" alt="Enlarged evidence" />
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="adminToastContainer"></div>
+
+  <script src="/admin/app.js"></script>
+</body>
+</html>

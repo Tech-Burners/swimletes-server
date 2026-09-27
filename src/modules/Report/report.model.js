@@ -2,52 +2,112 @@ const mongoose = require('mongoose');
 
 const reportSchema = new mongoose.Schema(
   {
-    type: {
-      type: String,
-      default: 'Report'
-    },
-    reporterId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    },
-    reportedId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    },
-    bookingId: {
+    // 1. Booking Reference & Cached ID (e.g. BK-88214)
+    booking: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Booking',
+      required: [true, 'Booking reference is required'],
+      index: true
+    },
+    bookingId: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true
+    },
+
+    // 2. Who is filing the report
+    reporter: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: [true, 'Reporter reference is required'],
+      index: true
+    },
+    reporterRole: {
+      type: String,
+      enum: ['user', 'instructor', 'admin'],
       required: true
     },
+
+    // 3. Parties involved in the lesson
+    client: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: [true, 'Client reference is required'],
+      index: true
+    },
+    instructor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: [true, 'Instructor reference is required'],
+      index: true
+    },
+
+    // 4. Dispute / Issue details (Figma 40012392:3369 & 40012554:20832)
     reason: {
       type: String,
-      default: ''
+      required: [true, 'Dispute reason is required'],
+      trim: true
     },
-    description: {
+    details: {
       type: String,
-      required: true
+      trim: true,
+      default: '' // "Add any details help us look into this"
     },
-    image: {
-      type: String,
-      default: ''
+    photos: [
+      {
+        type: String,
+        trim: true
+      }
+    ],
+
+    // 5. Booking financial & schedule snapshot
+    amount: {
+      type: Number,
+      default: 0
     },
-    images: [{ type: String }],
+    lessonDate: {
+      type: Date
+    },
+
+    // 6. Dispute Resolution Status
     status: {
       type: String,
       enum: ['open', 'resolved', 'dismissed'],
-      default: 'open'
+      default: 'open',
+      index: true
     },
-    isResolved: {
-      type: Boolean,
-      default: false
+
+    // 7. Admin resolution outcome details
+    resolution: {
+      action: {
+        type: String,
+        enum: ['none', 'dismissed', 'resolved_no_action', 'refunded', 'warning_issued', 'custom'],
+        default: 'none'
+      },
+      notes: {
+        type: String,
+        trim: true,
+        default: ''
+      },
+      resolvedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      },
+      resolvedAt: {
+        type: Date
+      }
     }
   },
-  { timestamps: true }
+  {
+    timestamps: true
+  }
 );
 
-const Report = mongoose.model('Report', reportSchema);
+// Indexes for fast lookup
+reportSchema.index({ status: 1, createdAt: -1 });
+reportSchema.index({ client: 1, createdAt: -1 });
+reportSchema.index({ instructor: 1, createdAt: -1 });
+reportSchema.index({ reporter: 1, booking: 1 });
 
-module.exports = Report;
-
+module.exports = mongoose.model('Report', reportSchema);

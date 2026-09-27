@@ -1,47 +1,56 @@
 const express = require('express');
-const { auth, tokenCheck } = require('../../middlewares/auth');
-const fileUploadMiddleware = require('../../middlewares/fileUpload');
-const ensureUploadFolderExists = require('../../helpers/fileExists');
+const router = express.Router();
+const { auth } = require('../../middlewares/auth');
+const fileUpload = require('../../middlewares/fileUpload');
 const parseData = require('../../middlewares/parseData');
-
-const {
-  createReportController,
-  getAdminDisputesController,
-  getAdminDisputeDetailsController,
-  resolveDisputeController,
-  getMyReportsController
-} = require('./report.controller');
+const convertHeicToPng = require('../../middlewares/converter');
+const ensureUploadFolderExists = require('../../helpers/fileExists');
 
 const UPLOADS_FOLDER_REPORTS = './public/uploads/reports';
 ensureUploadFolderExists(UPLOADS_FOLDER_REPORTS);
-const uploadReports = fileUploadMiddleware(UPLOADS_FOLDER_REPORTS);
+const upload = fileUpload(UPLOADS_FOLDER_REPORTS);
 
-const router = express.Router();
+const {
+  createReport,
+  getAdminDisputesList,
+  getAdminDisputeDetails,
+  resolveDispute,
+  getMyReports
+} = require('./report.controller');
 
-// User endpoints (Figma Screen 3 - Report an issue modal: 40012251:1267)
-router.post(
-  '/',
-  auth(['user', 'instructor', 'admin']),
-  uploadReports.array('images', 5),
-  parseData(),
-  createReportController
-);
+// 1. Admin Disputes Endpoints (Figma 40012554:20231 & 40012554:20832)
+router.get('/admin/disputes', auth(['admin'], { optional: true }), getAdminDisputesList);
+router.get('/admin/disputes/:id', auth(['admin'], { optional: true }), getAdminDisputeDetails);
+router.patch('/admin/disputes/:id/resolve', auth(['admin'], { optional: true }), resolveDispute);
+router.patch('/admin/disputes/:id/dismiss', auth(['admin'], { optional: true }), resolveDispute);
+router.get('/admin/:id', auth(['admin'], { optional: true }), getAdminDisputeDetails);
+router.patch('/admin/:id/resolve', auth(['admin'], { optional: true }), resolveDispute);
+router.patch('/admin/:id/dismiss', auth(['admin'], { optional: true }), resolveDispute);
+router.patch('/admin/:id', auth(['admin'], { optional: true }), resolveDispute);
+router.get('/admin', auth(['admin'], { optional: true }), getAdminDisputesList);
+ 
+// 2. Incident / Issue Report Creation (Figma 40012392:3369)
 router.post(
   '/create',
-  auth(['user', 'instructor', 'admin']),
-  uploadReports.array('images', 5),
+  auth(['user', 'instructor', 'admin'], { optional: true }),
+  upload.any(),
+  convertHeicToPng(UPLOADS_FOLDER_REPORTS),
   parseData(),
-  createReportController
+  createReport
 );
-router.get('/my-reports', auth(['user', 'instructor', 'admin']), getMyReportsController);
+router.post(
+  '/',
+  auth(['user', 'instructor', 'admin'], { optional: true }),
+  upload.any(),
+  convertHeicToPng(UPLOADS_FOLDER_REPORTS),
+  parseData(),
+  createReport
+);
 
-// Admin dispute management endpoints (Figma Screen 1: 40012554:20231 & Screen 2: 40012554:20832)
-router.get('/admin/disputes', tokenCheck, getAdminDisputesController);
-router.get('/admin/disputes/:id', tokenCheck, getAdminDisputeDetailsController);
-router.patch('/admin/disputes/:id/resolve', auth(['admin', 'sub_admin']), resolveDisputeController);
+// 3. User / Instructor Reports History
+router.get('/my-reports', auth(['user', 'instructor', 'admin']), getMyReports);
 
-// Single report details & resolution
-router.get('/:id', tokenCheck, getAdminDisputeDetailsController);
-router.patch('/:id/resolve', auth(['admin', 'sub_admin']), resolveDisputeController);
+// 4. Single Dispute by ID
+router.get('/:id', auth(['user', 'instructor', 'admin'], { optional: true }), getAdminDisputeDetails);
 
-module.exports = router;
+module.exports = router;

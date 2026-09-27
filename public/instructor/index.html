@@ -31,6 +31,10 @@
         <span class="tab-num">2</span>
         <span>Lesson Details (40012321:3120)</span>
       </button>
+      <a href="/admin" class="nav-tab-btn" target="_blank" style="text-decoration: none; color: inherit;">
+        <span class="tab-num">3</span>
+        <span>Admin Disputes (40012554:20231) ↗</span>
+      </a>
     </div>
 
     <div class="view-controls">
@@ -338,11 +342,27 @@
             <img src="/images/instructor/icon_back.svg" alt="Back" />
           </button>
           <h1 class="details-header-title">Lesson details</h1>
-          <div class="top-bar-placeholder"></div>
+          <button class="icon-report-top-btn" id="btnOpenReportIssue" onclick="openReportModal()" title="Report an issue (Figma 40012392:3374)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+              <line x1="12" y1="9" x2="12" y2="13"></line>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+          </button>
         </div>
 
-        <!-- Expiration Alert Banner -->
-        <div class="urgent-expiry-banner">
+        <!-- Lesson in Progress Card (Figma 40012392:3378) -->
+        <div class="lesson-in-progress-card" id="lessonInProgressCard">
+          <div class="progress-status-badge-row">
+            <span class="green-live-dot"></span>
+            <span class="progress-badge-text">Lesson in progress</span>
+          </div>
+          <div class="progress-timer-display" id="lessonTimerDisplay">22:14</div>
+          <div class="progress-subtext-display">remaining · ends 4:00 PM</div>
+        </div>
+
+        <!-- Expiration Alert Banner (For pending requests) -->
+        <div class="urgent-expiry-banner" id="urgentExpiryBanner" style="display: none;">
           <div class="banner-left-group">
             <img src="/images/instructor/icon_clock_orange.svg" class="banner-clock-icon" alt="Timer" />
             <span class="banner-expiry-highlight" id="detailsExpiresIn">Expires in 4h 12m</span>
@@ -524,6 +544,101 @@
         <button class="btn-modal-confirm" onclick="confirmWithdraw()">Confirm Transfer</button>
       </div>
     </div>
+  <!-- ============================================== -->
+  <!-- REPORT AN ISSUE BOTTOM SHEET (Figma 40012392:3369) -->
+  <!-- ============================================== -->
+  <div class="sheet-backdrop hidden" id="reportIssueBackdrop" onclick="closeReportModal()"></div>
+
+  <div class="report-issue-sheet hidden" id="sheetReportIssue">
+    <!-- Top Grabber (36x5) -->
+    <div class="sheet-grabber-wrap">
+      <div class="sheet-grabber"></div>
+    </div>
+
+    <!-- Close Button (Circular X) -->
+    <button type="button" class="sheet-close-btn" onclick="closeReportModal()" title="Close">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <line x1="18" y1="6" x2="6" y2="18"></line>
+        <line x1="6" y1="6" x2="18" y2="18"></line>
+      </svg>
+    </button>
+
+    <!-- Header Warning Badge -->
+    <div class="report-warning-badge">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E8943F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+        <line x1="12" y1="9" x2="12" y2="13"></line>
+        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+      </svg>
+    </div>
+
+    <!-- Title -->
+    <h2 class="report-sheet-title">Report an issue</h2>
+
+    <!-- Form -->
+    <form class="report-sheet-form" id="formReportIssue" onsubmit="submitReportIssue(event)">
+      
+      <!-- Reason Dropdown Field -->
+      <div class="report-field-group">
+        <label for="reportReasonSelect" class="report-field-label">Reason</label>
+        <div class="custom-select-wrap">
+          <select id="reportReasonSelect" class="report-select-input" required>
+            <option value="" disabled selected>Choose a Reason</option>
+            <option value="Instructor arrived late">Instructor arrived late</option>
+            <option value="Session cancelled last minute">Session cancelled last minute</option>
+            <option value="Safety concerns">Safety concerns</option>
+            <option value="Swimmer no-show">Swimmer no-show</option>
+            <option value="Inappropriate behavior">Inappropriate behavior</option>
+            <option value="Pool condition / access issue">Pool condition / access issue</option>
+            <option value="Billing or payment issue">Billing or payment issue</option>
+            <option value="Other">Other</option>
+          </select>
+          <svg class="select-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Tell us more Details Field -->
+      <div class="report-field-group">
+        <label for="reportDetailsInput" class="report-field-label">Tell us more</label>
+        <textarea
+          id="reportDetailsInput"
+          class="report-textarea-input"
+          placeholder="Add any details help us look into this"
+          rows="3"
+        ></textarea>
+      </div>
+
+      <!-- Add photo field (Optional) -->
+      <div class="report-field-group">
+        <input type="file" id="reportPhotoFile" accept="image/*" class="hidden" onchange="handleReportPhotoSelected(event)" />
+        <button type="button" class="btn-add-photo-dashed" id="btnAddPhoto" onclick="document.getElementById('reportPhotoFile').click()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+            <polyline points="21 15 16 10 5 21"></polyline>
+          </svg>
+          <span id="addPhotoBtnText">Add a photo (optional)</span>
+        </button>
+        <div class="photo-preview-bar hidden" id="photoPreviewBar">
+          <img src="" alt="Preview" class="photo-preview-thumb" id="photoPreviewImg" />
+          <span class="photo-preview-name" id="photoPreviewName">photo.jpg</span>
+          <button type="button" class="btn-remove-photo" onclick="removeReportPhoto()" title="Remove photo">✕</button>
+        </div>
+      </div>
+
+      <!-- Submit & Cancel Action Buttons -->
+      <div class="report-actions-stack">
+        <button type="submit" class="btn-submit-report" id="btnSubmitReport">
+          <span>Submit Report</span>
+        </button>
+        <button type="button" class="btn-cancel-report" onclick="closeReportModal()">
+          Cancel
+        </button>
+      </div>
+
+    </form>
   </div>
 
   <script src="app.js"></script>

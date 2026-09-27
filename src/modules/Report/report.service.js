@@ -1,254 +1,264 @@
 const mongoose = require('mongoose');
-const Report = require('./report.model');
-const userModel = require('../User/user.model');
-const Booking = require('../Booking/booking.model');
+const { status: httpStatus } = require('http-status');
 const ApiError = require('../../helpers/ApiError');
-const httpStatus = require('http-status');
+const Report = require('./report.model');
+const Booking = require('../Booking/booking.model');
+const User = require('../User/user.model');
 
-/**
- * Extract 2-letter uppercase initials from full name
- * e.g. "Ronald Patel" -> "RP", "Diego Alvarez" -> "DA"
- */
-function getInitials(fullName) {
-  if (!fullName || typeof fullName !== 'string') return 'U';
-  const parts = fullName.trim().split(/\s+/);
-  if (parts.length === 1) {
-    return parts[0].substring(0, 2).toUpperCase();
-  }
+// Helper to format date like "Aug 5, 2026"
+const formatDisplayDate = (dateObj) => {
+  if (!dateObj) return 'N/A';
+  const d = new Date(dateObj);
+  if (isNaN(d.getTime())) return 'N/A';
+  return d.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+};
+
+// Helper to get initials from fullName
+const getInitials = (name) => {
+  if (!name || typeof name !== 'string') return '??';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
+};
 
-/**
- * Format Date to "MMM D, YYYY" (e.g. "Aug 5, 2026")
- */
-function formatDate(date) {
-  if (!date) return '';
-  const d = new Date(date);
-  if (isNaN(d.getTime())) return '';
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
-}
+// Avatar color palette matching Figma
+const AVATAR_PALETTE = ['#64748B', '#0EA5E9', '#EF4444', '#10B981', '#8B5CF6', '#F59E0B', '#EC4899', '#14B8A6'];
 
-/**
- * Create a new report / dispute (Figma Screen 3 - Node 40012251:1267 "Report an issue")
- */
-const createReportService = async (userId, payload = {}, files = []) => {
-  if (!userId) {
-    throw new ApiError(httpStatus.UNAUTHORIZED, 'User authentication required');
+const getAvatarColor = (identifier, fallbackIndex = 0) => {
+  if (identifier) {
+    let hash = 0;
+    const str = String(identifier);
+    for (let i = 0; i < str.length; i++) {
+      hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const idx = Math.abs(hash) % AVATAR_PALETTE.length;
+    return AVATAR_PALETTE[idx];
+  }
+  return AVATAR_PALETTE[fallbackIndex % AVATAR_PALETTE.length];
+};
+
+const createReportService = async (userId, userRole, data = {}, files = []) => {
+  let payload = data || {};
+  if (payload && payload.data) {
+    if (typeof payload.data === 'string') {
+      try {
+        payload = JSON.parse(payload.data);
+      } catch (e) {
+        // keep payload
+      }
+    } else if (typeof payload.data === 'object' && payload.data !== null) {
+      payload = payload.data;
+    }
   }
 
-  const { bookingId, reason, description, details, tellUsMore, reportedId, type } = payload;
-  const issueReason = reason ? String(reason).trim() : '';
-  const issueDescription = (description || details || tellUsMore || '').trim();
+  const { bookingId, reason, details } = payload;
 
-  if (!bookingId) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Booking ID is required to submit a report');
+  if (!reason || !reason.trim()) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Dispute reason is required');
   }
 
-  if (!issueReason) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Please select a reason for the report');
+  // Look up booking by Mongo _id or custom bookingId
+  let bookingFilter = {};
+  if (bookingId && mongoose.Types.ObjectId.isValid(bookingId)) {
+    bookingFilter = { $or: [{ _id: bookingId }, { bookingId: bookingId }] };
+  } else if (bookingId) {
+    bookingFilter = { bookingId: bookingId };
+  } else {
+    // If no bookingId provided, fallback to finding active/recent booking for this user
+    const recentBooking = await Booking.findOne({
+      $or: [{ client: userId }, { instructor: userId }]
+    }).sort({ createdAt: -1 });
+
+    if (!recentBooking) {
+      throw new ApiError(httpStatus.BAD_REQUEST, 'Booking ID is required to file a report');
+    }
+    bookingFilter = { _id: recentBooking._id };
   }
 
-  if (!issueDescription) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Please provide details about the issue');
-  }
-
-  // 1. Locate the booking
-  let booking = null;
-  if (mongoose.Types.ObjectId.isValid(bookingId)) {
-    booking = await Booking.findById(bookingId).populate('client instructor');
-  }
-  if (!booking) {
-    booking = await Booking.findOne({ bookingId: String(bookingId).trim() }).populate('client instructor');
-  }
+  const booking = await Booking.findOne(bookingFilter)
+    .populate('client', 'fullName email')
+    .populate('instructor', 'fullName email');
 
   if (!booking) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
   }
 
-  // 2. Resolve Reporter and Reported User
-  const reporterObjectId = new mongoose.Types.ObjectId(String(userId));
-  let targetReportedId = null;
-
-  if (reportedId && mongoose.Types.ObjectId.isValid(reportedId)) {
-    targetReportedId = new mongoose.Types.ObjectId(String(reportedId));
-  } else {
-    // Auto-resolve counterpart
-    const clientUserId = booking.client?._id ? booking.client._id.toString() : booking.client?.toString();
-    const instructorUserId = booking.instructor?._id ? booking.instructor._id.toString() : booking.instructor?.toString();
-
-    if (userId.toString() === clientUserId) {
-      targetReportedId = booking.instructor?._id || booking.instructor;
-    } else if (userId.toString() === instructorUserId) {
-      targetReportedId = booking.client?._id || booking.client;
-    } else {
-      // Default to instructor if reported by a third party/client
-      targetReportedId = booking.instructor?._id || booking.instructor;
-    }
+  // Determine reporter ID safely (handles optional auth or demo payload)
+  let effectiveUserId = userId;
+  if (!effectiveUserId) {
+    effectiveUserId = userRole === 'instructor' ? booking.instructor?._id : booking.client?._id;
   }
 
-  // 3. Process Uploaded Images / Photos
-  let images = [];
-  if (Array.isArray(payload.images)) {
-    images = payload.images.filter(Boolean);
-  } else if (typeof payload.images === 'string' && payload.images.trim()) {
-    images = [payload.images.trim()];
+  // Verify authorization (Must be client, instructor, or admin)
+  const isClient = booking.client?._id?.toString() === effectiveUserId?.toString();
+  const isInstructor = booking.instructor?._id?.toString() === effectiveUserId?.toString();
+  const isAdmin = userRole === 'admin';
+
+  if (!isClient && !isInstructor && !isAdmin) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'You are not authorized to report this booking');
   }
 
-  if (files && files.length > 0) {
+  // Process photos
+  const photoPaths = [];
+  if (files && Array.isArray(files)) {
     files.forEach((file) => {
-      images.push(file.filename || file.path);
+      photoPaths.push(`/uploads/reports/${file.filename}`);
     });
+  } else if (files && files.filename) {
+    photoPaths.push(`/uploads/reports/${files.filename}`);
   }
 
-  const bookingRef = booking.bookingId || `BK-${String(booking._id).slice(-5).toUpperCase()}`;
+  // Also support photo / image url passed in body
+  const photoUrl = payload.photo || payload.image || data.photo || data.image;
+  if (photoUrl && typeof photoUrl === 'string' && photoUrl.trim()) {
+    photoPaths.push(photoUrl.trim());
+  }
 
-  // 4. Create the Report document
-  const reportDoc = await Report.create({
-    type: type || 'Dispute',
-    reporterId: reporterObjectId,
-    reportedId: targetReportedId,
-    bookingId: booking._id,
-    bookingRef: bookingRef,
-    reason: issueReason,
-    description: issueDescription,
-    images: images,
-    status: 'open',
-    isResolved: false
+  const generatedBookingId =
+    booking.bookingId || `BK-${booking._id.toString().slice(-5).toUpperCase()}`;
+
+  const amount =
+    booking.pricing?.totalAmount ||
+    booking.pricing?.lessonPrice ||
+    0;
+
+  // Create dispute record
+  const report = await Report.create({
+    booking: booking._id,
+    bookingId: generatedBookingId,
+    reporter: effectiveUserId,
+    reporterRole: userRole || (isInstructor ? 'instructor' : 'user'),
+    client: booking.client._id,
+    instructor: booking.instructor._id,
+    reason: reason.trim(),
+    details: (details || '').trim(),
+    photos: photoPaths,
+    amount,
+    lessonDate: booking.date || new Date(),
+    status: 'open'
   });
 
-  // 5. Update Booking status to 'disputed'
-  booking.status = 'disputed';
-  await booking.save();
+  // Flag booking status as disputed
+  await Booking.findByIdAndUpdate(booking._id, {
+    status: 'disputed'
+  });
 
-  // 6. Populate and return created report
-  const populatedReport = await Report.findById(reportDoc._id)
-    .populate('reporterId', 'fullName email image address')
-    .populate('reportedId', 'fullName email image address')
-    .populate('bookingId');
-
-  return populatedReport;
+  return {
+    reportId: report._id,
+    bookingId: report.bookingId,
+    reason: report.reason,
+    details: report.details,
+    photos: report.photos,
+    status: report.status,
+    createdAt: report.createdAt
+  };
 };
 
 /**
- * Get Admin Disputes List (Figma Screen 1 - Node 40012554:20231)
- * Supports filter tabs: Open, Resolved, All
- * Supports search by booking ID, client, instructor, reason
+ * Admin Disputes List (Figma 40012554:20231)
+ * Columns: Booking ID, Client, Instructor, Date, Status, Reason, Actions
+ * Tabs: Open (count), Resolved (count), All (count)
  */
-const getAdminDisputesService = async (queryParams = {}) => {
-  const { status = 'open', search, sortBy = 'date', page = 1, limit = 10 } = queryParams;
+const getAdminDisputesListService = async (queryParams = {}) => {
+  const {
+    status = 'all',
+    search,
+    sortBy = 'createdAt',
+    sortOrder = 'desc',
+    page = 1,
+    limit = 20
+  } = queryParams;
 
-  // 1. Calculate Tab Counts
-  const [openCount, resolvedCount, allCount] = await Promise.all([
-    Report.countDocuments({ status: 'open', isResolved: false }),
-    Report.countDocuments({ $or: [{ status: { $in: ['resolved', 'dismissed'] } }, { isResolved: true }] }),
-    Report.countDocuments({})
-  ]);
-
-  // 2. Build Status Query Filter
-  let statusFilter = {};
-  if (status === 'open') {
-    statusFilter = { status: 'open', isResolved: false };
-  } else if (status === 'resolved') {
-    statusFilter = { $or: [{ status: { $in: ['resolved', 'dismissed'] } }, { isResolved: true }] };
-  } else {
-    statusFilter = {}; // 'all'
-  }
-
-  // 3. Build Search Filter
-  let searchFilter = {};
-  if (search && search.trim()) {
-    const searchRegex = { $regex: search.trim(), $options: 'i' };
-
-    // Find matching users by name
-    const matchedUsers = await userModel.find({ fullName: searchRegex }).select('_id');
-    const matchedUserIds = matchedUsers.map((u) => u._id);
-
-    searchFilter = {
-      $or: [
-        { bookingRef: searchRegex },
-        { reason: searchRegex },
-        { description: searchRegex },
-        { reporterId: { $in: matchedUserIds } },
-        { reportedId: { $in: matchedUserIds } }
-      ]
-    };
-  }
-
-  const finalFilter = {
-    ...statusFilter,
-    ...searchFilter
-  };
-
-  // 4. Pagination & Sorting
-  const pageNum = Math.max(1, parseInt(page, 10));
-  const limitNum = Math.max(1, parseInt(limit, 10));
+  const pageNum = Math.max(1, Number(page) || 1);
+  const limitNum = Math.max(1, Number(limit) || 20);
   const skip = (pageNum - 1) * limitNum;
 
-  const total = await Report.countDocuments(finalFilter);
+  // 1. Fetch total counts across tab categories
+  const [allCount, openCount, resolvedCount] = await Promise.all([
+    Report.countDocuments({}),
+    Report.countDocuments({ status: 'open' }),
+    Report.countDocuments({ status: { $in: ['resolved', 'dismissed'] } })
+  ]);
 
-  const disputes = await Report.find(finalFilter)
-    .populate('reporterId', 'fullName email image')
-    .populate('reportedId', 'fullName email image role')
-    .populate('bookingId')
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limitNum);
-
-  // 5. Format Disputes List to match Figma Table Columns
-  const formattedDisputes = disputes.map((item) => {
-    const bookingDoc = item.bookingId;
-    const reporter = item.reporterId;
-    const reported = item.reportedId;
-
-    // Identify Client vs Instructor
-    let client = reporter;
-    let instructor = reported;
-
-    if (bookingDoc?.client && bookingDoc?.instructor) {
-      if (reporter?._id?.toString() === bookingDoc.instructor.toString()) {
-        instructor = reporter;
-        client = reported;
-      }
+  // 2. Build filter
+  const filter = {};
+  if (status && status !== 'all') {
+    if (status === 'open') {
+      filter.status = 'open';
+    } else if (status === 'resolved') {
+      filter.status = { $in: ['resolved', 'dismissed'] };
+    } else {
+      filter.status = status;
     }
+  }
 
-    const clientName = client?.fullName || 'Carlos Mendez';
-    const instructorName = instructor?.fullName || 'Jordan Ellis';
+  // 3. Search query
+  if (search && search.trim()) {
+    const searchRegex = new RegExp(search.trim(), 'i');
 
-    const clientInitials = getInitials(clientName);
-    const instructorInitials = getInitials(instructorName);
+    const matchingUsers = await User.find({
+      fullName: searchRegex
+    }).select('_id').lean();
 
-    const amount = bookingDoc?.pricing?.totalAmount || bookingDoc?.pricing?.lessonPrice || 45;
-    const bookingCode = item.bookingRef || bookingDoc?.bookingId || `BK-${String(item._id).slice(-5).toUpperCase()}`;
+    const matchingUserIds = matchingUsers.map((u) => u._id);
+
+    filter.$or = [
+      { bookingId: searchRegex },
+      { reason: searchRegex },
+      { details: searchRegex },
+      { client: { $in: matchingUserIds } },
+      { instructor: { $in: matchingUserIds } }
+    ];
+  }
+
+  const sortDirection = sortOrder === 'asc' ? 1 : -1;
+  const sortCriteria = { [sortBy]: sortDirection };
+
+  const totalFiltered = await Report.countDocuments(filter);
+  const reports = await Report.find(filter)
+    .sort(sortCriteria)
+    .skip(skip)
+    .limit(limitNum)
+    .populate('client', 'fullName image')
+    .populate('instructor', 'fullName image')
+    .lean();
+
+  const formattedDisputes = reports.map((rep, idx) => {
+    const clientName = rep.client?.fullName || 'Client';
+    const instructorName = rep.instructor?.fullName || 'Instructor';
+    const clientLetter = getInitials(clientName);
+    const instructorLetter = getInitials(instructorName);
+    const clientColor = getAvatarColor(rep.client?._id || clientName, idx * 2);
+    const instructorColor = getAvatarColor(rep.instructor?._id || instructorName, idx * 2 + 1);
 
     return {
-      _id: item._id,
-      bookingId: bookingCode,
-      bookingRef: bookingCode,
-      bookingObjectId: bookingDoc?._id || null,
+      _id: rep._id,
+      bookingId: rep.bookingId,
       client: {
-        _id: client?._id || null,
+        _id: rep.client?._id || null,
         fullName: clientName,
-        image: client?.image || 'user.jpg',
-        initials: clientInitials,
-        email: client?.email || ''
+        image: rep.client?.image || null,
+        letter: clientLetter,
+        color: clientColor,
+        initials: clientLetter,
+        avatarColor: clientColor
       },
       instructor: {
-        _id: instructor?._id || null,
+        _id: rep.instructor?._id || null,
         fullName: instructorName,
-        image: instructor?.image || 'user.jpg',
-        initials: instructorInitials,
-        email: instructor?.email || ''
+        image: rep.instructor?.image || null,
+        letter: instructorLetter,
+        color: instructorColor,
+        initials: instructorLetter,
+        avatarColor: instructorColor
       },
-      date: formatDate(item.createdAt),
-      bookingDate: formatDate(bookingDoc?.date || item.createdAt),
-      status: item.status,
-      isResolved: item.isResolved,
-      reason: item.reason,
-      description: item.description,
-      amount: `$${amount}`,
-      amountNumber: amount,
-      createdAt: item.createdAt
+      date: formatDisplayDate(rep.lessonDate || rep.createdAt),
+      status: rep.status,
+      reason: rep.reason
     };
   });
 
@@ -259,189 +269,188 @@ const getAdminDisputesService = async (queryParams = {}) => {
       all: allCount
     },
     disputes: formattedDisputes,
-    total,
-    page: pageNum,
-    totalPages: Math.ceil(total / limitNum) || 1
+    pagination: {
+      totalResults: totalFiltered,
+      totalPages: Math.ceil(totalFiltered / limitNum),
+      currentPage: pageNum,
+      limit: limitNum
+    }
   };
 };
 
 /**
- * Get Admin Dispute Details Drawer (Figma Screen 2 - Node 40012554:20832)
+ * Admin Dispute Details Drawer (Figma 40012554:20832)
+ * Slide-out drawer with Dispute: BK-XXXX, Badge, Client, Instructor,
+ * Booking ID, Date, Amount, Flagged Reason, Details, Photo, Dismiss & Resolve actions.
  */
 const getAdminDisputeDetailsService = async (disputeId) => {
-  if (!disputeId) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Dispute ID is required');
-  }
-
-  let dispute = null;
+  let filter = {};
   if (mongoose.Types.ObjectId.isValid(disputeId)) {
-    dispute = await Report.findById(disputeId)
-      .populate('reporterId', 'fullName email image address number')
-      .populate('reportedId', 'fullName email image address number')
-      .populate({
-        path: 'bookingId',
-        populate: [{ path: 'client', select: 'fullName email image' }, { path: 'instructor', select: 'fullName email image' }]
-      })
-      .populate('resolution.resolvedBy', 'fullName email');
+    filter = { _id: disputeId };
+  } else {
+    filter = { bookingId: disputeId };
   }
+
+  const dispute = await Report.findOne(filter)
+    .populate('client', 'fullName email image number')
+    .populate('instructor', 'fullName email image number')
+    .populate('reporter', 'fullName email role')
+    .populate('resolution.resolvedBy', 'fullName email')
+    .populate('booking')
+    .lean();
 
   if (!dispute) {
-    dispute = await Report.findOne({ bookingRef: String(disputeId).trim() })
-      .populate('reporterId', 'fullName email image address number')
-      .populate('reportedId', 'fullName email image address number')
-      .populate('bookingId')
-      .populate('resolution.resolvedBy', 'fullName email');
+    throw new ApiError(httpStatus.NOT_FOUND, 'Dispute record not found');
   }
 
-  if (!dispute) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Dispute not found');
-  }
+  const clientName = dispute.client?.fullName || 'Client';
+  const instructorName = dispute.instructor?.fullName || 'Instructor';
+  const clientLetter = getInitials(clientName);
+  const instructorLetter = getInitials(instructorName);
+  const clientColor = getAvatarColor(dispute.client?._id || clientName, 2);
+  const instructorColor = getAvatarColor(dispute.instructor?._id || instructorName, 0);
+  const displayDate = formatDisplayDate(dispute.lessonDate || dispute.booking?.date || dispute.createdAt);
 
-  const bookingDoc = dispute.bookingId;
-  const reporter = dispute.reporterId;
-  const reported = dispute.reportedId;
-
-  let client = reporter;
-  let instructor = reported;
-
-  if (bookingDoc?.client && bookingDoc?.instructor) {
-    if (reporter?._id?.toString() === bookingDoc.instructor?._id?.toString()) {
-      instructor = reporter;
-      client = reported;
-    }
-  }
-
-  const clientName = client?.fullName || 'Ronald Patel';
-  const instructorName = instructor?.fullName || 'Diego Alvarez';
-  const clientInitials = getInitials(clientName);
-  const instructorInitials = getInitials(instructorName);
-
-  const amount = bookingDoc?.pricing?.totalAmount || bookingDoc?.pricing?.lessonPrice || 45;
-  const bookingCode = dispute.bookingRef || bookingDoc?.bookingId || `BK-${String(dispute._id).slice(-5).toUpperCase()}`;
-
-  const hasPhotos = dispute.images && dispute.images.length > 0;
-  const photoText = hasPhotos ? `${dispute.images.length} photo(s) attached` : 'No photo attached.';
+  const displayStatus =
+    dispute.status === 'open' ? 'Open' : (dispute.status === 'dismissed' ? 'Dismissed' : 'Resolved');
 
   return {
     _id: dispute._id,
-    disputeTitle: `Dispute: ${bookingCode}`,
-    bookingId: bookingCode,
-    bookingRef: bookingCode,
+    bookingId: dispute.bookingId,
     status: dispute.status,
-    isResolved: dispute.isResolved,
+    statusBadge: displayStatus,
     client: {
-      _id: client?._id || null,
+      _id: dispute.client?._id,
       fullName: clientName,
-      image: client?.image || 'user.jpg',
-      initials: clientInitials,
-      email: client?.email || ''
+      letter: clientLetter,
+      color: clientColor,
+      initials: clientLetter,
+      avatarColor: clientColor,
+      image: dispute.client?.image || null,
+      email: dispute.client?.email,
+      phone: dispute.client?.number
     },
     instructor: {
-      _id: instructor?._id || null,
+      _id: dispute.instructor?._id,
       fullName: instructorName,
-      image: instructor?.image || 'user.jpg',
-      initials: instructorInitials,
-      email: instructor?.email || ''
+      letter: instructorLetter,
+      color: instructorColor,
+      initials: instructorLetter,
+      avatarColor: instructorColor,
+      image: dispute.instructor?.image || null,
+      email: dispute.instructor?.email,
+      phone: dispute.instructor?.number
     },
-    date: formatDate(dispute.createdAt),
-    bookingDate: formatDate(bookingDoc?.date || dispute.createdAt),
-    amount: `$${amount}`,
-    amountNumber: amount,
+    reporter: {
+      _id: dispute.reporter?._id,
+      fullName: dispute.reporter?.fullName,
+      role: dispute.reporterRole
+    },
+    date: displayDate,
+    amount: `$${dispute.amount || 0}`,
+    numericAmount: dispute.amount || 0,
     flaggedReason: dispute.reason,
-    reason: dispute.reason,
-    details: dispute.description,
-    description: dispute.description,
-    photo: hasPhotos ? dispute.images[0] : null,
-    photos: dispute.images || [],
-    photoText: photoText,
-    hasPhoto: hasPhotos,
+    details: dispute.details || 'No additional details provided.',
+    photo: dispute.photos && dispute.photos.length > 0 ? dispute.photos[0] : null,
+    photos: dispute.photos || [],
+    hasPhoto: dispute.photos && dispute.photos.length > 0,
     resolution: dispute.resolution || null,
-    booking: bookingDoc || null,
     createdAt: dispute.createdAt
   };
 };
 
 /**
- * Resolve / Dismiss Dispute (Figma Screen 2 Actions: "Dismiss", "Resolve – No Action", "Refund")
+ * Admin Dispute Resolution Actions (Dismiss / Resolve – No Action / Custom)
  */
-const resolveDisputeService = async (disputeId, adminId, resolutionData = {}) => {
-  if (!disputeId) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Dispute ID is required');
-  }
+const adminResolveDisputeService = async (disputeId, adminId, body = {}) => {
+  const { action = 'resolved_no_action', notes = '' } = body;
 
-  const { action = 'no_action', adminNotes = '', refundAmount = 0 } = resolutionData;
-
-  if (!['dismiss', 'no_action', 'refund', 'other'].includes(action)) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid resolution action. Allowed: dismiss, no_action, refund');
-  }
-
-  let dispute = null;
+  let filter = {};
   if (mongoose.Types.ObjectId.isValid(disputeId)) {
-    dispute = await Report.findById(disputeId).populate('bookingId');
+    filter = { _id: disputeId };
+  } else {
+    filter = { bookingId: disputeId };
   }
+
+  const dispute = await Report.findOne(filter);
   if (!dispute) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Dispute not found');
   }
 
-  const isDismiss = action === 'dismiss';
-  dispute.isResolved = true;
-  dispute.status = isDismiss ? 'dismissed' : 'resolved';
+  let newStatus = 'resolved';
+  let resolvedAction = action;
+
+  if (action === 'dismiss' || action === 'dismissed') {
+    newStatus = 'dismissed';
+    resolvedAction = 'dismissed';
+  } else if (action === 'resolve_no_action' || action === 'resolved_no_action') {
+    newStatus = 'resolved';
+    resolvedAction = 'resolved_no_action';
+  } else {
+    newStatus = 'resolved';
+    resolvedAction = action;
+  }
+
+  dispute.status = newStatus;
   dispute.resolution = {
-    action: action,
-    refundAmount: Number(refundAmount) || 0,
-    resolvedBy: adminId || null,
-    resolvedAt: new Date(),
-    adminNotes: adminNotes.trim()
+    action: resolvedAction,
+    notes: notes || (resolvedAction === 'dismissed' ? 'Dismissed by admin' : 'Resolved with no further action taken'),
+    resolvedBy: adminId,
+    resolvedAt: new Date()
   };
 
   await dispute.save();
 
-  // Update associated booking
-  if (dispute.bookingId) {
-    const booking = await Booking.findById(dispute.bookingId._id || dispute.bookingId);
-    if (booking) {
-      if (action === 'refund') {
-        booking.status = 'cancelled';
-        booking.cancelledBy = 'admin';
-        booking.cancellationReason = adminNotes || 'Dispute resolved with full/partial refund';
-        booking.refundAmount = Number(refundAmount) || booking.pricing?.totalAmount || 0;
-        if (booking.payment) {
-          booking.payment.status = 'refunded';
-        }
-        await booking.save();
-      } else if (action === 'dismiss' || action === 'no_action') {
-        // If booking was in 'disputed', set back to 'completed' or keep current
-        if (booking.status === 'disputed') {
-          booking.status = 'completed';
-          await booking.save();
-        }
-      }
-    }
+  // If dispute is dismissed or resolved, restore the booking status back from 'disputed' to 'completed' or original status
+  if (dispute.booking) {
+    await Booking.findByIdAndUpdate(dispute.booking, {
+      status: resolvedAction === 'refunded' ? 'cancelled' : 'completed'
+    });
   }
 
-  return await getAdminDisputeDetailsService(dispute._id);
+  return getAdminDisputeDetailsService(dispute._id);
 };
 
 /**
- * Get User's Filed Reports
+ * Get Reports for current logged in user (Client or Instructor)
  */
 const getMyReportsService = async (userId, queryParams = {}) => {
-  if (!userId) {
-    throw new ApiError(httpStatus.UNAUTHORIZED, 'User authentication required');
+  const { status: filterStatus } = queryParams;
+
+  const filter = {
+    $or: [{ client: userId }, { instructor: userId }, { reporter: userId }]
+  };
+
+  if (filterStatus && filterStatus !== 'all') {
+    filter.status = filterStatus;
   }
 
-  const reports = await Report.find({ reporterId: userId })
-    .populate('reportedId', 'fullName email image')
-    .populate('bookingId')
-    .sort({ createdAt: -1 });
+  const reports = await Report.find(filter)
+    .sort({ createdAt: -1 })
+    .populate('client', 'fullName email image')
+    .populate('instructor', 'fullName email image')
+    .populate('booking', 'date startTime endTime')
+    .lean();
 
-  return reports;
+  return reports.map((rep) => ({
+    _id: rep._id,
+    bookingId: rep.bookingId,
+    reason: rep.reason,
+    details: rep.details,
+    photos: rep.photos,
+    status: rep.status,
+    amount: rep.amount,
+    date: formatDisplayDate(rep.lessonDate || rep.createdAt),
+    clientName: rep.client?.fullName,
+    instructorName: rep.instructor?.fullName,
+    createdAt: rep.createdAt
+  }));
 };
 
 module.exports = {
   createReportService,
-  getAdminDisputesService,
+  getAdminDisputesListService,
   getAdminDisputeDetailsService,
-  resolveDisputeService,
+  adminResolveDisputeService,
   getMyReportsService
 };
