@@ -75,7 +75,7 @@
 ### High Priority
 
 - [ ] Log file rotation / cleanup (Current `combined.log` and `errors.log` are growing large; add `winston-daily-rotate-file`)
-- [ ] Stripe webhook handling and instructor payout settlement
+- [x] Stripe PaymentIntents, auto-checkout, webhooks, and automatic cancellation/decline refunds
 - [ ] Verify image upload workflows (Multer + static asset serving in `public/uploads/`)
 - [ ] Review environment variables in `.env` for production deployment
 

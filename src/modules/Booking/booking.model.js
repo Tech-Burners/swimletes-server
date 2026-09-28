@@ -161,7 +161,7 @@ const paymentInfoSchema = new mongoose.Schema(
   {
     method: {
       type: String,
-      enum: ['card', 'paypal', 'apple_pay', 'google_pay'],
+      enum: ['card', 'paypal', 'apple_pay', 'google_pay', 'stripe'],
       default: 'card'
     },
     status: {
@@ -175,6 +175,28 @@ const paymentInfoSchema = new mongoose.Schema(
     },
     paidAt: {
       type: Date
+    },
+    stripePaymentIntentId: {
+      type: String,
+      default: '',
+      index: true
+    },
+    stripeClientSecret: {
+      type: String,
+      default: ''
+    },
+    stripeSessionId: {
+      type: String,
+      default: '',
+      index: true
+    },
+    checkoutUrl: {
+      type: String,
+      default: ''
+    },
+    stripeRefundId: {
+      type: String,
+      default: ''
     }
   },
   { _id: false }
@@ -261,15 +283,16 @@ const bookingSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
-        'pending',   // Waiting for instructor approval
-        'accepted',  // Confirmed by instructor
-        'declined',  // Declined by instructor
-        'active',    // Happening now / in-progress
-        'completed', // Completed successfully
-        'cancelled', // Cancelled by client or instructor
-        'disputed'   // Under dispute investigation
+        'pending_payment', // Awaiting Stripe checkout payment
+        'pending',         // Paid, waiting for instructor approval
+        'accepted',        // Confirmed by instructor
+        'declined',        // Declined by instructor
+        'active',          // Happening now / in-progress
+        'completed',       // Completed successfully
+        'cancelled',       // Cancelled by client or instructor
+        'disputed'         // Under dispute investigation
       ],
-      default: 'pending',
+      default: 'pending_payment',
       index: true
     },
 

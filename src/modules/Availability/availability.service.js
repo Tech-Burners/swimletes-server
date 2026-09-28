@@ -1,6 +1,14 @@
 const Availability = require('./availability.model');
 const ApiError = require('../../helpers/ApiError');
-const httpStatus = require('http-status');
+const { status: httpStatus } = require('http-status');
+const {
+  timeStringToMinutes,
+  resolveEndTime,
+  isTimeOverlapping,
+  validateTimeRange,
+  findOverlappingSlot,
+  validateSlotsSchedule
+} = require('../../helpers/timeHelper');
 
 const defaultWeeklySchedule = [
   { day: 'monday', isAvailable: true, slots: [{ startTime: '09:00 AM', endTime: '12:00 PM' }, { startTime: '03:00 PM', endTime: '04:00 PM' }] },
@@ -24,6 +32,15 @@ const getAvailabilityByInstructorId = async (instructorId) => {
 };
 
 const updateAvailabilityService = async (instructorId, payload) => {
+  // Validate that no slots overlap / collapse within any day's schedule
+  if (payload.weeklySchedule && Array.isArray(payload.weeklySchedule)) {
+    for (const dayItem of payload.weeklySchedule) {
+      if (dayItem.slots && Array.isArray(dayItem.slots) && dayItem.slots.length > 0) {
+        validateSlotsSchedule(dayItem.slots, dayItem.day);
+      }
+    }
+  }
+
   let availability = await Availability.findOne({ instructor: instructorId });
   if (!availability) {
     availability = new Availability({
@@ -38,6 +55,13 @@ const updateAvailabilityService = async (instructorId, payload) => {
 };
 
 const addSlotService = async (instructorId, day, slotData) => {
+  if (!slotData || !slotData.startTime || !slotData.endTime) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Both startTime and endTime are required for the time slot');
+  }
+
+  // 1. Validate time format and order (start must be before end)
+  validateTimeRange(slotData.startTime, slotData.endTime);
+
   let availability = await getAvailabilityByInstructorId(instructorId);
   const daySchedule = availability.weeklySchedule.find(
     (item) => item.day.toLowerCase() === day.toLowerCase()
@@ -45,6 +69,15 @@ const addSlotService = async (instructorId, day, slotData) => {
 
   if (!daySchedule) {
     throw new ApiError(httpStatus.BAD_REQUEST, `Day ${day} not found in schedule`);
+  }
+
+  // 2. Check if new slot overlaps / collapses with any existing slot on this day
+  const conflictingSlot = findOverlappingSlot(slotData, daySchedule.slots || []);
+  if (conflictingSlot) {
+    throw new ApiError(
+      httpStatus.CONFLICT,
+      `Time slot ${slotData.startTime} – ${slotData.endTime} overlaps with existing slot ${conflictingSlot.startTime} – ${conflictingSlot.endTime} on ${day}. Time slots cannot collapse.`
+    );
   }
 
   daySchedule.slots.push(slotData);
@@ -115,14 +148,16 @@ const getInstructorSlotsService = async (instructorId, queryDate, queryMonth) =>
   const existingBookings = await Booking.find({
     instructor: instructorId,
     date: { $gte: startOfDay, $lte: endOfDay },
-    status: { $in: ['pending', 'accepted', 'active'] }
+    status: { $in: ['pending', 'accepted', 'active'] },
+    'payment.status': 'paid'
   });
 
-  const bookedStartTimes = new Set(existingBookings.map((b) => b.startTime));
-
-  // 2. Mark individual slots with isBooked
+  // 2. Mark individual slots with isBooked by checking if any booking overlaps with the slot
   const slots = (daySchedule?.slots || []).map((slot) => {
-    const isBooked = bookedStartTimes.has(slot.startTime);
+    const isBooked = existingBookings.some((b) => {
+      const bEndTime = resolveEndTime(b.startTime, b.endTime, b.duration);
+      return isTimeOverlapping(slot.startTime, slot.endTime, b.startTime, bEndTime);
+    });
     return {
       _id: slot._id,
       startTime: slot.startTime,
@@ -141,7 +176,8 @@ const getInstructorSlotsService = async (instructorId, queryDate, queryMonth) =>
   const stripBookings = await Booking.find({
     instructor: instructorId,
     date: { $gte: stripStart, $lte: stripEnd },
-    status: { $in: ['pending', 'accepted', 'active'] }
+    status: { $in: ['pending', 'accepted', 'active'] },
+    'payment.status': 'paid'
   });
 
   const calendarWeek = [];
@@ -164,7 +200,14 @@ const getInstructorSlotsService = async (instructorId, queryDate, queryMonth) =>
       return bDateStr === dDateStr;
     });
 
-    const bookedSlotsCount = bookingsOnDate.length;
+    const daySlots = dDaySchedule?.slots || [];
+    const bookedSlotsCount = daySlots.filter((slot) => {
+      return bookingsOnDate.some((b) => {
+        const bEndTime = resolveEndTime(b.startTime, b.endTime, b.duration);
+        return isTimeOverlapping(slot.startTime, slot.endTime, b.startTime, bEndTime);
+      });
+    }).length;
+
     const remainingOpenSlots = Math.max(0, totalDaySlots - bookedSlotsCount);
 
     let status = 'closed';
@@ -206,7 +249,8 @@ const getInstructorSlotsService = async (instructorId, queryDate, queryMonth) =>
     const monthBookings = await Booking.find({
       instructor: instructorId,
       date: { $gte: monthStart, $lte: monthEnd },
-      status: { $in: ['pending', 'accepted', 'active'] }
+      status: { $in: ['pending', 'accepted', 'active'] },
+      'payment.status': 'paid'
     });
 
     calendarMonth = [];
@@ -229,7 +273,15 @@ const getInstructorSlotsService = async (instructorId, queryDate, queryMonth) =>
         return bDateStr === dDateStr;
       });
 
-      const remainingSlots = Math.max(0, totalDaySlots - bookingsOnDay.length);
+      const daySlots = dDaySchedule?.slots || [];
+      const bookedOnDayCount = daySlots.filter((slot) => {
+        return bookingsOnDay.some((b) => {
+          const bEndTime = resolveEndTime(b.startTime, b.endTime, b.duration);
+          return isTimeOverlapping(slot.startTime, slot.endTime, b.startTime, bEndTime);
+        });
+      }).length;
+
+      const remainingSlots = Math.max(0, totalDaySlots - bookedOnDayCount);
       let dayState = 'open'; // 'chosen', 'open', 'fully_booked', 'pool_closed'
 
       if (dDateStr === selectedDateStr) {

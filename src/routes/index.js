@@ -49,6 +49,18 @@ const moduleRoutes = [
     route: bookingRoutes
   },
   {
+    path: '/bookings',
+    route: bookingRoutes
+  },
+  {
+    path: '/payment',
+    route: bookingRoutes
+  },
+  {
+    path: '/payments',
+    route: bookingRoutes
+  },
+  {
     path: '/review',
     route: reviewRoutes
   },

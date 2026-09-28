@@ -3,6 +3,13 @@ const Booking = require('./booking.model');
 const User = require('../User/user.model');
 const ApiError = require('../../helpers/ApiError');
 const { status: httpStatus } = require('http-status');
+const stripeHelper = require('../../helpers/stripe');
+const {
+  timeStringToMinutes,
+  minutesToTimeString,
+  resolveEndTime,
+  isTimeOverlapping
+} = require('../../helpers/timeHelper');
 
 /**
  * Safely parse date without UTC offset shifting
@@ -20,6 +27,325 @@ const parseBookingDate = (dateInput) => {
 
   const d = new Date(dateInput);
   return isNaN(d.getTime()) ? null : d;
+};
+
+/**
+ * Resolves base URL for Stripe redirect callbacks
+ */
+const getBaseUrl = (req = null) => {
+  // 1. If request comes from an active client with host headers, prioritize that active host!
+  if (req && req.headers) {
+    const forwardedHost = req.headers['x-forwarded-host'];
+    const host = forwardedHost || req.headers.host;
+    if (host) {
+      const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
+      return `${proto}://${host}`.replace(/\/+$/, '');
+    }
+  }
+
+  if (process.env.BACKEND_URL) {
+    return process.env.BACKEND_URL.replace(/\/+$/, '');
+  }
+
+  if (process.env.API_SERVER_IP) {
+    return `http://${process.env.API_SERVER_IP}:${process.env.BACKEND_PORT || 8049}`;
+  }
+
+  return `http://localhost:${process.env.BACKEND_PORT || 8049}`;
+};
+
+/**
+ * Check for booking conflicts for an instructor on a specific date & time
+ * Detects overlapping (collapsing) time intervals.
+ * Only PAID/CONFIRMED bookings block the time slot.
+ */
+const checkBookingConflict = async ({
+  instructorId,
+  clientId = null,
+  date,
+  startTime,
+  endTime = null,
+  duration = 60,
+  excludeBookingId = null
+}) => {
+  if (!date || !startTime) return null;
+  const bookingDate = parseBookingDate(date);
+  if (!bookingDate || isNaN(bookingDate.getTime())) return null;
+
+  const resolvedEndTime = resolveEndTime(startTime, endTime, duration);
+
+  const startOfDay = new Date(bookingDate);
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date(bookingDate);
+  endOfDay.setHours(23, 59, 59, 999);
+
+  // 1. Check Instructor Conflict (Double-Booking Prevention)
+  const instructorBookings = await Booking.find({
+    instructor: instructorId,
+    ...(excludeBookingId ? { _id: { $ne: excludeBookingId } } : {}),
+    date: { $gte: startOfDay, $lte: endOfDay },
+    status: { $in: ['pending', 'accepted', 'active'] },
+    'payment.status': 'paid'
+  });
+
+  const conflictingInstructorBooking = instructorBookings.find((b) => {
+    const bEndTime = resolveEndTime(b.startTime, b.endTime, b.duration);
+    return isTimeOverlapping(startTime, resolvedEndTime, b.startTime, bEndTime);
+  });
+
+  if (conflictingInstructorBooking) {
+    const conflictTimeRange = conflictingInstructorBooking.startTime && conflictingInstructorBooking.endTime
+      ? `${conflictingInstructorBooking.startTime} – ${conflictingInstructorBooking.endTime}`
+      : conflictingInstructorBooking.startTime;
+    return {
+      hasConflict: true,
+      type: 'instructor_conflict',
+      conflictingBookingId: conflictingInstructorBooking.bookingId || conflictingInstructorBooking._id,
+      conflictingTime: conflictTimeRange,
+      message: 'This time slot is already booked. Please choose another time.'
+    };
+  }
+
+  // 2. Check Client Conflict (Client cannot book overlapping lessons at the same time)
+  if (clientId) {
+    const clientBookings = await Booking.find({
+      client: clientId,
+      ...(excludeBookingId ? { _id: { $ne: excludeBookingId } } : {}),
+      date: { $gte: startOfDay, $lte: endOfDay },
+      status: { $in: ['pending', 'accepted', 'active'] },
+      'payment.status': 'paid'
+    });
+
+    const conflictingClientBooking = clientBookings.find((b) => {
+      const bEndTime = resolveEndTime(b.startTime, b.endTime, b.duration);
+      return isTimeOverlapping(startTime, resolvedEndTime, b.startTime, bEndTime);
+    });
+
+    if (conflictingClientBooking) {
+      const conflictTimeRange = conflictingClientBooking.startTime && conflictingClientBooking.endTime
+        ? `${conflictingClientBooking.startTime} – ${conflictingClientBooking.endTime}`
+        : conflictingClientBooking.startTime;
+      return {
+        hasConflict: true,
+        type: 'client_conflict',
+        conflictingBookingId: conflictingClientBooking.bookingId || conflictingClientBooking._id,
+        conflictingTime: conflictTimeRange,
+        message: `You already have another swimming lesson booked at ${conflictTimeRange}. Please select a different time slot.`
+      };
+    }
+  }
+
+  // 3. Check Instructor Weekly Availability (if instructor has an Availability schedule)
+  try {
+    const Availability = require('../Availability/availability.model');
+    const availabilityDoc = await Availability.findOne({ instructor: instructorId });
+    if (availabilityDoc && availabilityDoc.weeklySchedule && availabilityDoc.weeklySchedule.length > 0) {
+      const daysOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+      const dayName = daysOfWeek[bookingDate.getDay()];
+      const daySchedule = availabilityDoc.weeklySchedule.find(
+        (item) => item.day.toLowerCase() === dayName.toLowerCase()
+      );
+
+      if (daySchedule) {
+        if (!daySchedule.isAvailable || !daySchedule.slots || daySchedule.slots.length === 0) {
+          return {
+            hasConflict: true,
+            type: 'availability_closed',
+            message: `Instructor is not available on ${dayName.charAt(0).toUpperCase() + dayName.slice(1)}s. Please choose an open day.`
+          };
+        }
+
+        const reqStartMin = timeStringToMinutes(startTime);
+        const reqEndMin = timeStringToMinutes(resolvedEndTime);
+
+        if (reqStartMin !== null && reqEndMin !== null) {
+          const fitsInSlot = daySchedule.slots.some((slot) => {
+            const slotStartMin = timeStringToMinutes(slot.startTime);
+            const slotEndMin = timeStringToMinutes(slot.endTime);
+            if (slotStartMin === null || slotEndMin === null) return false;
+            return reqStartMin >= slotStartMin && reqEndMin <= slotEndMin;
+          });
+
+          if (!fitsInSlot) {
+            return {
+              hasConflict: true,
+              type: 'outside_availability',
+              message: `Requested time (${startTime} – ${resolvedEndTime}) is outside the instructor's available hours for this day. Please choose another time.`
+            };
+          }
+        }
+      }
+    }
+  } catch (avErr) {
+    // Continue cleanly if availability check fails
+  }
+
+  return null;
+};
+
+/**
+ * Format "Review & Pay" Screen Payload (Strictly matching Figma 40012199:3518)
+ * Strips all unnecessary database metadata, returning exact visual fields.
+ */
+const formatReviewAndPayResponse = (booking, checkoutSession = null) => {
+  const b = booking.toObject ? booking.toObject() : booking;
+  const bDate = parseBookingDate(b.date);
+  const daysShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monthsLong = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+  let formattedDate = '';
+  if (bDate && !isNaN(bDate.getTime())) {
+    formattedDate = `${daysShort[bDate.getDay()]}, ${monthsShort[bDate.getMonth()]} ${bDate.getDate()} ${bDate.getFullYear()}`;
+  }
+
+  const comfortLevelMap = {
+    never_been_in_water: 'Never been in water',
+    nervous_beginner: 'Nervous beginner',
+    can_float_paddle: 'Can float & paddle',
+    swims_confidently: 'Swims confidently'
+  };
+
+  const swimmerName = b.swimmer?.name || 'Swimmer';
+  const swimmerAge = b.swimmer?.age !== undefined && b.swimmer?.age !== null ? b.swimmer.age : '';
+  const swimmerDisplay = swimmerAge !== '' ? `${swimmerName}, age ${swimmerAge}` : swimmerName;
+  const comfortLevel = comfortLevelMap[b.swimmer?.comfortLevel] || b.swimmer?.comfortLevel || 'Nervous beginner';
+
+  const durationMin = b.duration || 60;
+  const lessonType = b.lessonType || `${durationMin}-min private lesson`;
+  const timeRange = b.startTime && b.endTime ? `${b.startTime} – ${b.endTime}` : (b.startTime || '');
+
+  let waiverSignedDate = '';
+  if (b.waiver?.signedDate) {
+    const wd = new Date(b.waiver.signedDate);
+    if (!isNaN(wd.getTime())) {
+      const d = wd.getDate();
+      const suffix = (d > 3 && d < 21) ? 'th' : (['th', 'st', 'nd', 'rd'][d % 10] || 'th');
+      waiverSignedDate = `${d}${suffix} ${monthsLong[wd.getMonth()]} ${wd.getFullYear()}`;
+    }
+  }
+
+  const signerName = b.waiver?.legalName || b.client?.fullName || 'Paula McMahon';
+  const waiverText = b.waiver?.isSigned ? `Form 1 signed by ${signerName}` : `Form 1 signed by ${signerName}`;
+
+  const sessionUrl = checkoutSession?.url || b.payment?.checkoutUrl || '';
+  const sessionId = checkoutSession?.id || b.payment?.stripeSessionId || '';
+
+  const lessonPrice = Number(b.pricing?.lessonPrice || 60);
+  const bookingFee = Number(b.pricing?.bookingFee || 3);
+  const totalAmount = Number(b.pricing?.totalAmount || (lessonPrice + bookingFee));
+
+  return {
+    _id: b._id,
+    bookingId: b.bookingId || '',
+    status: b.status,
+    paymentUrl: sessionUrl,
+    sessionId: sessionId,
+    instructor: {
+      _id: b.instructor?._id,
+      fullName: b.instructor?.fullName || 'Instructor',
+      image: b.instructor?.image || ''
+    },
+    swimmer: {
+      name: swimmerName,
+      age: swimmerAge,
+      display: swimmerDisplay,
+      comfortLevel: comfortLevel
+    },
+    lesson: {
+      type: lessonType,
+      date: formattedDate,
+      time: timeRange
+    },
+    location: {
+      poolName: b.location?.poolName || '',
+      address: b.location?.address || ''
+    },
+    waiver: {
+      isSigned: Boolean(b.waiver?.isSigned ?? true),
+      text: waiverText,
+      date: waiverSignedDate || '30th July 2026'
+    },
+    price: {
+      lessonPrice,
+      bookingFee,
+      totalAmount,
+      currency: 'USD',
+      note: 'Charged now. Nothing to pay at the pool.'
+    }
+  };
+};
+
+/**
+ * Format "Booking Confirmed" Screen Payload (Strictly matching Figma 40012199:3699)
+ * Strips all unnecessary backend/database fields.
+ */
+const formatBookingConfirmedResponse = (booking, session = null) => {
+  const b = booking.toObject ? booking.toObject() : booking;
+  const bDate = parseBookingDate(b.date);
+  const daysShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  let formattedDate = '';
+  let cancellationNotice = '';
+
+  if (bDate && !isNaN(bDate.getTime())) {
+    formattedDate = `${daysShort[bDate.getDay()]}, ${monthsShort[bDate.getMonth()]} ${bDate.getDate()}, ${bDate.getFullYear()}`;
+    const deadlineDate = new Date(bDate);
+    deadlineDate.setDate(deadlineDate.getDate() - 1);
+    cancellationNotice = `Free to change or cancel until ${daysShort[deadlineDate.getDay()]}, ${monthsShort[deadlineDate.getMonth()]} ${deadlineDate.getDate()} at ${b.startTime || '10:00 AM'}.`;
+  }
+
+  const instructorFullName = b.instructor?.fullName || 'Instructor';
+  const instructorFirstName = instructorFullName.trim().split(' ')[0] || 'Instructor';
+
+  const poolName = b.location?.poolName || '';
+  const address = b.location?.address || '';
+  const fullLocation = poolName && address ? `${poolName}, ${address}` : (poolName || address);
+  const mapQuery = encodeURIComponent(fullLocation);
+
+  const durationMin = b.duration || 60;
+  const lessonType = b.lessonType || `${durationMin}-min private lesson`;
+  const timeRange = b.startTime && b.endTime ? `${b.startTime} – ${b.endTime}` : (b.startTime || '');
+
+  const chatId = b.chat?._id || b.chat || null;
+
+  return {
+    _id: b._id,
+    bookingId: b.bookingId || '',
+    status: b.status,
+    paid: true,
+    paymentStatus: 'paid',
+    header: {
+      title: 'Booking confirmed',
+      subtitle: `${instructorFirstName} has the details. We’ve emailed you a receipt and added a reminder for the day before.`
+    },
+    schedule: {
+      date: formattedDate,
+      time: timeRange
+    },
+    actions: {
+      calendar: {
+        title: `${lessonType} with ${instructorFullName}`,
+        date: formattedDate,
+        startTime: b.startTime || '',
+        endTime: b.endTime || '',
+        location: fullLocation
+      },
+      directions: {
+        poolName,
+        address,
+        mapUrl: `https://maps.google.com/?q=${mapQuery}`
+      },
+      message: {
+        chatId,
+        instructorId: b.instructor?._id || null,
+        instructorName: instructorFirstName,
+        buttonText: `Message ${instructorFirstName}`
+      }
+    },
+    cancellationNotice
+  };
 };
 
 /**
@@ -75,6 +401,9 @@ const formatUserBookingCard = (booking) => {
     lessonTitle: `Private lesson for ${swimmerName}`,
     poolName: b.location?.poolName || b.location?.address || '',
     price: Number(b.pricing?.totalAmount || 0),
+    paymentStatus: b.payment?.status || 'unpaid',
+    checkoutUrl: b.payment?.checkoutUrl || null,
+    paymentUrl: b.payment?.checkoutUrl || null,
     rating: clientReview?.rating || null,
     ratingText: clientReview?.rating ? `You rated ${Number(clientReview.rating).toFixed(1)}` : null,
     instructor: {
@@ -198,7 +527,9 @@ const createBookingService = async (authUserId, payload) => {
     waiver,
     legalName = '',
     pricing,
-    paymentMethod = 'card'
+    paymentMethod = 'card',
+    paymentIntentId,
+    stripePaymentIntentId
   } = payload;
 
   const effectiveClientId = explicitClientId || authUserId;
@@ -220,7 +551,23 @@ const createBookingService = async (authUserId, payload) => {
   }
 
   // 1. Time Slot Conflict Check (Double-Booking Prevention)
+  const resolvedEndTime = resolveEndTime(startTime, endTime, duration);
+
   if (date && startTime) {
+    const conflict = await checkBookingConflict({
+      instructorId,
+      clientId: effectiveClientId,
+      date,
+      startTime,
+      endTime: resolvedEndTime,
+      duration
+    });
+
+    if (conflict) {
+      throw new ApiError(httpStatus.CONFLICT, conflict.message);
+    }
+
+    // Clean up any previous unpaid booking attempts on this slot for this client
     const bookingDate = parseBookingDate(date);
     if (bookingDate) {
       const startOfDay = new Date(bookingDate);
@@ -228,16 +575,14 @@ const createBookingService = async (authUserId, payload) => {
       const endOfDay = new Date(bookingDate);
       endOfDay.setHours(23, 59, 59, 999);
 
-      const existingBooking = await Booking.findOne({
+      await Booking.deleteMany({
         instructor: instructorId,
+        client: effectiveClientId,
         date: { $gte: startOfDay, $lte: endOfDay },
         startTime,
-        status: { $in: ['pending', 'accepted', 'active'] }
+        status: 'pending_payment',
+        'payment.status': { $ne: 'paid' }
       });
-
-      if (existingBooking) {
-        throw new ApiError(httpStatus.CONFLICT, 'This time slot is already booked. Please choose another time.');
-      }
     }
   }
 
@@ -291,6 +636,34 @@ const createBookingService = async (authUserId, payload) => {
   // Request expires in 24 hours from creation
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
+  // 5. Stripe Payment Processing & Checkout Link Generation
+  const targetPaymentIntentId = paymentIntentId || stripePaymentIntentId || null;
+  let paymentStatus = 'unpaid';
+  let verifiedPaymentIntent = null;
+  let paidAt = null;
+  let initialStatus = 'pending_payment';
+
+  if (targetPaymentIntentId && typeof targetPaymentIntentId === 'string' && targetPaymentIntentId.startsWith('pi_')) {
+    try {
+      verifiedPaymentIntent = await stripeHelper.retrievePaymentIntent(targetPaymentIntentId);
+      if (verifiedPaymentIntent.status === 'succeeded') {
+        paymentStatus = 'paid';
+        paidAt = new Date();
+        initialStatus = 'pending';
+      } else if (['processing', 'requires_action', 'requires_capture'].includes(verifiedPaymentIntent.status)) {
+        paymentStatus = 'pending';
+        initialStatus = 'pending_payment';
+      } else {
+        paymentStatus = 'unpaid';
+        initialStatus = 'pending_payment';
+      }
+    } catch (stripeErr) {
+      console.error('Error verifying Stripe payment intent on booking create:', stripeErr.message);
+      paymentStatus = 'unpaid';
+      initialStatus = 'pending_payment';
+    }
+  }
+
   const booking = await Booking.create({
     client: effectiveClientId,
     instructor: instructorId,
@@ -299,7 +672,7 @@ const createBookingService = async (authUserId, payload) => {
     duration,
     date,
     startTime,
-    endTime,
+    endTime: resolvedEndTime,
     location: locationObj,
     waiver: waiverObj,
     pricing: {
@@ -313,13 +686,56 @@ const createBookingService = async (authUserId, payload) => {
       platformCommission
     },
     payment: {
-      method: paymentMethod,
-      status: 'paid',
-      paidAt: new Date()
+      method: paymentMethod || 'stripe',
+      status: paymentStatus,
+      transactionId: verifiedPaymentIntent?.id || (targetPaymentIntentId || ''),
+      paidAt,
+      stripePaymentIntentId: verifiedPaymentIntent?.id || (targetPaymentIntentId || ''),
+      stripeClientSecret: verifiedPaymentIntent?.client_secret || ''
     },
-    status: 'pending',
+    status: initialStatus,
     expiresAt
   });
+
+  // Generate Stripe Checkout Session Link if payment not already completed
+  let checkoutSession = null;
+  if (paymentStatus !== 'paid') {
+    try {
+      const baseUrl = getBaseUrl(payload.req);
+      const successUrl = payload.successUrl || `${baseUrl}/api/v1/booking/payment/success?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking._id}`;
+      const cancelUrl = payload.cancelUrl || `${baseUrl}/api/v1/booking/payment/cancel?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking._id}`;
+
+      checkoutSession = await stripeHelper.createCheckoutSession({
+        amount: totalAmount,
+        currency: 'usd',
+        customerEmail: clientUser?.email,
+        clientReferenceId: booking._id,
+        metadata: {
+          bookingId: String(booking._id),
+          bookingReference: String(booking.bookingId || ''),
+          clientId: String(effectiveClientId),
+          instructorId: String(instructorId),
+          lessonType: String(lessonType)
+        },
+        successUrl,
+        cancelUrl,
+        description: `Swimletes: ${lessonType} for ${swimmerObj.name}`
+      });
+
+      booking.payment.stripeSessionId = checkoutSession.id;
+      booking.payment.checkoutUrl = checkoutSession.url;
+      booking.payment.transactionId = checkoutSession.id;
+      if (checkoutSession.payment_intent) {
+        booking.payment.stripePaymentIntentId = typeof checkoutSession.payment_intent === 'object'
+          ? checkoutSession.payment_intent.id
+          : checkoutSession.payment_intent;
+      }
+      await booking.save();
+    } catch (stripeErr) {
+      console.error('Error generating Stripe checkout session link on booking create:', stripeErr);
+      throw new ApiError(httpStatus.BAD_REQUEST, `Failed to generate Stripe payment link: ${stripeErr.message}`);
+    }
+  }
 
   // Auto-link or create chat between client and instructor for this booking
   try {
@@ -353,44 +769,11 @@ const createBookingService = async (authUserId, payload) => {
     .populate('instructor', 'fullName email image number bio address certifications avgRating totalReviews')
     .populate('chat');
 
-  // Format full Confirmation Payload matching Figma Screen 40012199:3699
-  const baseCard = formatUserBookingCard(populated);
-  const bDate = parseBookingDate(populated.date);
-  const daysShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-  let cancellationDeadline = '';
-  let formattedFullDate = '';
-  if (bDate && !isNaN(bDate.getTime())) {
-    formattedFullDate = `${daysShort[bDate.getDay()]}, ${monthsShort[bDate.getMonth()]} ${bDate.getDate()}, ${bDate.getFullYear()}`;
-    const deadlineDate = new Date(bDate);
-    deadlineDate.setDate(deadlineDate.getDate() - 1);
-    cancellationDeadline = `Free to change or cancel until ${daysShort[deadlineDate.getDay()]}, ${monthsShort[deadlineDate.getMonth()]} ${deadlineDate.getDate()} at ${populated.startTime || '10:00 AM'}.`;
+  if (populated.payment?.status === 'paid') {
+    return formatBookingConfirmedResponse(populated);
   }
 
-  return {
-    ...baseCard,
-    bookingId: populated.bookingId,
-    formattedFullDate,
-    timeRange: `${populated.startTime || ''} – ${populated.endTime || ''}`,
-    startTime: populated.startTime,
-    endTime: populated.endTime,
-    duration: populated.duration,
-    lessonType: populated.lessonType,
-    swimmer: populated.swimmer,
-    location: populated.location,
-    pricing: populated.pricing,
-    cancellationNotice: cancellationDeadline,
-    chatId: populated.chat?._id || populated.chat || null,
-    canChat: true,
-    calendarEvent: {
-      title: `${populated.lessonType} with ${populated.instructor?.fullName || 'Instructor'}`,
-      startDate: populated.date,
-      startTime: populated.startTime,
-      endTime: populated.endTime,
-      location: populated.location?.poolName ? `${populated.location.poolName}, ${populated.location.address}` : populated.location?.address
-    }
-  };
+  return formatReviewAndPayResponse(populated, checkoutSession);
 };
 
 /**
@@ -428,7 +811,13 @@ const getMyBookingsService = async (userId, role, queryParams = {}) => {
   } else if (normalizedTab === 'completed') {
     query.status = 'completed';
   } else if (['requests', 'to_confirm', 'requested', 'pending', 'pending_approval'].includes(normalizedTab)) {
-    query.status = 'pending';
+    if (role === 'instructor') {
+      query.status = 'pending';
+    } else {
+      query.status = { $in: ['pending', 'pending_payment'] };
+    }
+  } else if (['unpaid', 'pending_payment'].includes(normalizedTab)) {
+    query.status = 'pending_payment';
   } else if (['cancelled', 'declined'].includes(normalizedTab)) {
     query.status = { $in: ['cancelled', 'declined'] };
   } else if (normalizedTab === 'all') {
@@ -486,12 +875,13 @@ const getMyBookingsService = async (userId, role, queryParams = {}) => {
 const getBookingTabCountsService = async (userId, role) => {
   const userQuery = role === 'instructor' ? { instructor: userId } : { client: userId };
 
-  const [pendingCount, acceptedUpcomingCount, activeCount, completedCount, cancelledCount] = await Promise.all([
+  const [pendingCount, acceptedUpcomingCount, activeCount, completedCount, cancelledCount, pendingPaymentCount] = await Promise.all([
     Booking.countDocuments({ ...userQuery, status: 'pending' }),
     Booking.countDocuments({ ...userQuery, status: 'accepted' }),
     Booking.countDocuments({ ...userQuery, status: 'active' }),
     Booking.countDocuments({ ...userQuery, status: 'completed' }),
-    Booking.countDocuments({ ...userQuery, status: { $in: ['cancelled', 'declined'] } })
+    Booking.countDocuments({ ...userQuery, status: { $in: ['cancelled', 'declined'] } }),
+    Booking.countDocuments({ ...userQuery, status: 'pending_payment' })
   ]);
 
   if (role === 'instructor') {
@@ -507,13 +897,16 @@ const getBookingTabCountsService = async (userId, role) => {
   }
 
   return {
+    requests: pendingCount + pendingPaymentCount,
+    unpaid: pendingPaymentCount,
+    pending: pendingCount,
     upcoming: acceptedUpcomingCount,
     active: activeCount,
     completed: completedCount,
     toConfirm: pendingCount,
     requested: pendingCount,
     cancelled: cancelledCount,
-    total: pendingCount + acceptedUpcomingCount + activeCount + completedCount + cancelledCount
+    total: pendingCount + acceptedUpcomingCount + activeCount + completedCount + cancelledCount + pendingPaymentCount
   };
 };
 
@@ -721,6 +1114,23 @@ const getBookingByIdService = async (bookingId, userId, userRole) => {
       address: b.location?.address || '',
       coordinates: b.location?.location?.coordinates || []
     },
+    payment: {
+      method: b.payment?.method || 'card',
+      status: b.payment?.status || 'unpaid',
+      transactionId: b.payment?.transactionId || '',
+      paidAt: b.payment?.paidAt || null,
+      stripePaymentIntentId: b.payment?.stripePaymentIntentId || '',
+      stripeClientSecret: b.payment?.stripeClientSecret || '',
+      stripeRefundId: b.payment?.stripeRefundId || ''
+    },
+    ...(b.payment?.stripeClientSecret ? {
+      stripe: {
+        clientSecret: b.payment.stripeClientSecret,
+        paymentIntentId: b.payment.stripePaymentIntentId || b.payment.transactionId || '',
+        amount: b.pricing?.totalAmount || 0,
+        currency: 'usd'
+      }
+    } : {}),
     scheduleConflict,
     chatId: b.chat?._id || b.chat || null,
     canChat: ['accepted', 'active'].includes(b.status),
@@ -781,6 +1191,21 @@ const acceptBookingService = async (bookingId, instructorId) => {
 
   if (booking.status !== 'pending') {
     throw new ApiError(httpStatus.BAD_REQUEST, `Cannot accept booking with status '${booking.status}'`);
+  }
+
+  // Conflict check before accepting: ensure no other lesson has taken this time slot
+  const conflict = await checkBookingConflict({
+    instructorId: booking.instructor,
+    clientId: booking.client,
+    date: booking.date,
+    startTime: booking.startTime,
+    endTime: booking.endTime,
+    duration: booking.duration,
+    excludeBookingId: booking._id
+  });
+
+  if (conflict) {
+    throw new ApiError(httpStatus.CONFLICT, conflict.message);
   }
 
   booking.status = 'accepted';
@@ -845,6 +1270,36 @@ const declineBookingService = async (bookingId, instructorId, reason = '') => {
   booking.status = 'declined';
   booking.declinedReason = String(reason || '').trim();
   booking.declinedAt = new Date();
+  const totalAmount = booking.pricing?.totalAmount || 0;
+  booking.refundAmount = totalAmount;
+
+  // Process full Stripe refund if payment was already made
+  const paymentIntentId = booking.payment?.stripePaymentIntentId || booking.payment?.transactionId;
+  if (
+    booking.payment?.status === 'paid' &&
+    totalAmount > 0 &&
+    paymentIntentId &&
+    typeof paymentIntentId === 'string' &&
+    paymentIntentId.startsWith('pi_')
+  ) {
+    try {
+      const refund = await stripeHelper.createRefund({
+        paymentIntentId,
+        amount: totalAmount,
+        reason: 'requested_by_customer',
+        metadata: {
+          bookingId: String(booking._id),
+          bookingReference: booking.bookingId || '',
+          action: 'instructor_declined'
+        }
+      });
+      booking.payment.stripeRefundId = refund.id;
+      booking.payment.status = 'refunded';
+    } catch (refundErr) {
+      console.error('Error processing Stripe refund on decline:', refundErr.message);
+    }
+  }
+
   await booking.save();
 
   const populated = await Booking.findById(booking._id)
@@ -985,6 +1440,33 @@ const cancelBookingService = async (bookingId, userId, userRole, reason = '') =>
   booking.cancellationWindow = cancellationWindow;
   booking.refundAmount = refundAmount;
   booking.cancelledAt = new Date();
+
+  // Process Stripe refund if payment was completed and refundAmount > 0
+  const paymentIntentId = booking.payment?.stripePaymentIntentId || booking.payment?.transactionId;
+  if (
+    booking.payment?.status === 'paid' &&
+    refundAmount > 0 &&
+    paymentIntentId &&
+    typeof paymentIntentId === 'string' &&
+    paymentIntentId.startsWith('pi_')
+  ) {
+    try {
+      const refund = await stripeHelper.createRefund({
+        paymentIntentId,
+        amount: refundAmount,
+        reason: 'requested_by_customer',
+        metadata: {
+          bookingId: String(booking._id),
+          bookingReference: booking.bookingId || '',
+          cancellationWindow
+        }
+      });
+      booking.payment.stripeRefundId = refund.id;
+      booking.payment.status = refundAmount >= (booking.pricing?.totalAmount || 0) ? 'refunded' : 'partially_refunded';
+    } catch (refundErr) {
+      console.error('Error processing Stripe refund on cancellation:', refundErr.message);
+    }
+  }
 
   await booking.save();
 
@@ -1460,6 +1942,707 @@ const adminUpdateBookingStatusService = async (bookingId, payload = {}) => {
   return getAdminBookingDetailsService(updatedBooking._id);
 };
 
+/**
+ * Create Stripe PaymentIntent for a Booking
+ */
+const createBookingPaymentIntentService = async (userId, payload = {}) => {
+  const {
+    amount,
+    totalAmount: rawTotalAmount,
+    pricing,
+    bookingId,
+    instructorId,
+    currency = 'usd'
+  } = payload;
+
+  const clientUser = await User.findById(userId);
+  if (!clientUser) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
+  }
+
+  // Determine amount
+  let calculatedAmount = Number(amount || rawTotalAmount);
+  if (!calculatedAmount && pricing?.totalAmount) {
+    calculatedAmount = Number(pricing.totalAmount);
+  } else if (!calculatedAmount && pricing?.lessonPrice) {
+    const lessonPrice = Number(pricing.lessonPrice);
+    const bookingFee = Number(pricing.bookingFee) || +(lessonPrice * 0.05).toFixed(2);
+    const poolEntryFee = Number(pricing.poolEntryFee) || 0;
+    const travelFee = Number(pricing.travelFee) || 0;
+    const discountAmount = Number(pricing.discountAmount) || 0;
+    calculatedAmount = +(lessonPrice + bookingFee + poolEntryFee + travelFee - discountAmount).toFixed(2);
+  }
+
+  if (!calculatedAmount || calculatedAmount <= 0) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'A valid payment amount is required');
+  }
+
+  let existingBooking = null;
+  if (bookingId && mongoose.Types.ObjectId.isValid(bookingId)) {
+    existingBooking = await Booking.findById(bookingId);
+  }
+
+  if (existingBooking) {
+    const conflict = await checkBookingConflict({
+      instructorId: existingBooking.instructor,
+      clientId: existingBooking.client,
+      date: existingBooking.date,
+      startTime: existingBooking.startTime,
+      endTime: existingBooking.endTime,
+      duration: existingBooking.duration,
+      excludeBookingId: existingBooking._id
+    });
+
+    if (conflict) {
+      throw new ApiError(httpStatus.CONFLICT, conflict.message);
+    }
+  }
+
+  const metadata = {
+    clientId: String(userId),
+    clientEmail: clientUser.email || '',
+    ...(instructorId ? { instructorId: String(instructorId) } : {}),
+    ...(existingBooking ? { bookingId: String(existingBooking._id), bookingReference: existingBooking.bookingId || '' } : {})
+  };
+
+  const paymentIntent = await stripeHelper.createPaymentIntent({
+    amount: calculatedAmount,
+    currency,
+    receiptEmail: clientUser.email,
+    metadata,
+    description: `Swimletes Lesson Booking ${existingBooking?.bookingId || ''}`.trim()
+  });
+
+  if (existingBooking) {
+    existingBooking.payment.stripePaymentIntentId = paymentIntent.id;
+    existingBooking.payment.stripeClientSecret = paymentIntent.client_secret;
+    existingBooking.payment.transactionId = paymentIntent.id;
+    existingBooking.payment.status = 'unpaid';
+    await existingBooking.save();
+  }
+
+  return {
+    clientSecret: paymentIntent.client_secret,
+    paymentIntentId: paymentIntent.id,
+    amount: calculatedAmount,
+    currency: paymentIntent.currency,
+    publishableKey: process.env.STRIPE_PK || process.env.STRIPE_PUBLISHABLE_KEY || ''
+  };
+};
+
+/**
+ * Confirm Booking Payment after Stripe Payment Sheet succeeds
+ */
+const confirmBookingPaymentService = async (bookingId, userId, paymentIntentId = null) => {
+  if (!mongoose.Types.ObjectId.isValid(bookingId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid Booking ID');
+  }
+
+  const booking = await Booking.findById(bookingId);
+  if (!booking) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
+  }
+
+  const targetPi = paymentIntentId || booking.payment?.stripePaymentIntentId || booking.payment?.transactionId;
+  if (!targetPi) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Payment intent ID is required to confirm payment');
+  }
+
+  const paymentIntent = await stripeHelper.retrievePaymentIntent(targetPi);
+  if (paymentIntent.status === 'succeeded') {
+    // Conflict check before finalizing payment to prevent double booking
+    const conflict = await checkBookingConflict({
+      instructorId: booking.instructor,
+      clientId: booking.client,
+      date: booking.date,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      duration: booking.duration,
+      excludeBookingId: booking._id
+    });
+
+    if (conflict) {
+      booking.payment.status = 'paid';
+      booking.status = 'cancelled';
+      booking.cancellationReason = conflict.message;
+      await booking.save();
+
+      try {
+        await stripeHelper.createRefund({ paymentIntentId: targetPi, reason: 'duplicate' });
+        booking.payment.status = 'refunded';
+        await booking.save();
+      } catch (rfErr) {
+        console.warn('Could not auto-refund conflicted booking in confirmBookingPayment:', rfErr.message);
+      }
+
+      throw new ApiError(httpStatus.CONFLICT, conflict.message);
+    }
+
+    booking.payment.status = 'paid';
+    booking.payment.paidAt = new Date();
+    booking.payment.transactionId = paymentIntent.id;
+    booking.payment.stripePaymentIntentId = paymentIntent.id;
+    if (booking.status === 'pending_payment') {
+      booking.status = 'pending';
+    }
+    await booking.save();
+  } else if (['processing', 'requires_action', 'requires_capture'].includes(paymentIntent.status)) {
+    booking.payment.status = 'pending';
+    await booking.save();
+  } else {
+    booking.payment.status = 'failed';
+    await booking.save();
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      `Payment is not complete. Current Stripe status: ${paymentIntent.status}`
+    );
+  }
+
+  const populated = await Booking.findById(booking._id)
+    .populate('client', 'fullName email image number address')
+    .populate('instructor', 'fullName email image number bio address certifications avgRating totalReviews')
+    .populate('chat');
+
+  return formatBookingConfirmedResponse(populated);
+};
+
+/**
+ * Create or re-generate Stripe Checkout Session for a Booking
+ */
+const createBookingCheckoutSessionService = async (userId, payload = {}) => {
+  const { bookingId, successUrl: customSuccessUrl, cancelUrl: customCancelUrl, req } = payload;
+  if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Valid Booking ID is required');
+  }
+
+  const booking = await Booking.findById(bookingId)
+    .populate('client', 'fullName email image')
+    .populate('instructor', 'fullName email image');
+
+  if (!booking) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
+  }
+
+  if (userId && booking.client?._id && booking.client._id.toString() !== userId.toString()) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'You are not authorized to pay for this booking');
+  }
+
+  if (booking.payment?.status === 'paid') {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'This booking has already been paid');
+  }
+
+  // Conflict check before generating checkout session
+  const conflict = await checkBookingConflict({
+    instructorId: booking.instructor?._id || booking.instructor,
+    clientId: booking.client?._id || booking.client,
+    date: booking.date,
+    startTime: booking.startTime,
+    endTime: booking.endTime,
+    duration: booking.duration,
+    excludeBookingId: booking._id
+  });
+
+  if (conflict) {
+    throw new ApiError(httpStatus.CONFLICT, conflict.message);
+  }
+
+  const totalAmount = Number(booking.pricing?.totalAmount || 0);
+  if (!totalAmount || totalAmount <= 0) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid booking total amount');
+  }
+
+  const baseUrl = getBaseUrl(req);
+  const successUrl = customSuccessUrl || `${baseUrl}/api/v1/booking/payment/success?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking._id}`;
+  const cancelUrl = customCancelUrl || `${baseUrl}/api/v1/booking/payment/cancel?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking._id}`;
+
+  const session = await stripeHelper.createCheckoutSession({
+    amount: totalAmount,
+    currency: 'usd',
+    customerEmail: booking.client?.email,
+    clientReferenceId: booking._id,
+    metadata: {
+      bookingId: String(booking._id),
+      bookingReference: String(booking.bookingId || ''),
+      clientId: String(booking.client?._id || ''),
+      instructorId: String(booking.instructor?._id || ''),
+      lessonType: String(booking.lessonType || '')
+    },
+    successUrl,
+    cancelUrl,
+    description: `Swimletes Lesson Booking ${booking.bookingId || ''}`.trim()
+  });
+
+  booking.payment.stripeSessionId = session.id;
+  booking.payment.checkoutUrl = session.url;
+  booking.payment.transactionId = session.id;
+  if (session.payment_intent) {
+    booking.payment.stripePaymentIntentId = typeof session.payment_intent === 'object'
+      ? session.payment_intent.id
+      : session.payment_intent;
+  }
+  await booking.save();
+
+  const populated = await Booking.findById(booking._id)
+    .populate('client', 'fullName email image')
+    .populate('instructor', 'fullName email image');
+
+  return formatReviewAndPayResponse(populated, session);
+};
+
+/**
+ * Verify Checkout Payment and Confirm Booking upon redirect/API call
+ */
+const verifyCheckoutPaymentSuccessService = async (sessionId = null, bookingId = null, paymentIntentId = null) => {
+  let targetSessionId = sessionId;
+  let targetBookingId = bookingId;
+  let booking = null;
+
+  if (targetBookingId && mongoose.Types.ObjectId.isValid(targetBookingId)) {
+    booking = await Booking.findById(targetBookingId)
+      .populate('client', 'fullName email image')
+      .populate('instructor', 'fullName email image');
+  }
+
+  if (!booking && targetBookingId && typeof targetBookingId === 'string' && targetBookingId.startsWith('SW-')) {
+    booking = await Booking.findOne({ bookingId: targetBookingId })
+      .populate('client', 'fullName email image')
+      .populate('instructor', 'fullName email image');
+  }
+
+  if (!booking && targetSessionId) {
+    booking = await Booking.findOne({ 'payment.stripeSessionId': targetSessionId })
+      .populate('client', 'fullName email image')
+      .populate('instructor', 'fullName email image');
+  }
+
+  if (!targetSessionId && booking?.payment?.stripeSessionId) {
+    targetSessionId = booking.payment.stripeSessionId;
+  }
+
+  let session = null;
+  let isPaid = false;
+
+  if (targetSessionId) {
+    try {
+      session = await stripeHelper.retrieveCheckoutSession(targetSessionId);
+      isPaid = session.payment_status === 'paid';
+    } catch (e) {
+      console.warn('Could not retrieve Stripe checkout session:', e.message);
+    }
+  }
+
+  // If booking wasn't found initially, try looking up via Stripe session metadata
+  if (!booking && session) {
+    const metaBookingId = session.metadata?.bookingId || session.client_reference_id;
+    if (metaBookingId && mongoose.Types.ObjectId.isValid(metaBookingId)) {
+      booking = await Booking.findById(metaBookingId)
+        .populate('client', 'fullName email image')
+        .populate('instructor', 'fullName email image');
+    }
+    if (!booking && session.metadata?.bookingReference) {
+      booking = await Booking.findOne({ bookingId: session.metadata.bookingReference })
+        .populate('client', 'fullName email image')
+        .populate('instructor', 'fullName email image');
+    }
+  }
+
+  const piId = paymentIntentId || session?.payment_intent || booking?.payment?.stripePaymentIntentId;
+  if (!isPaid && piId) {
+    try {
+      const piString = typeof piId === 'object' ? piId.id : piId;
+      const pi = await stripeHelper.retrievePaymentIntent(piString);
+      isPaid = pi.status === 'succeeded';
+    } catch (e) {
+      console.warn('Could not retrieve Stripe payment intent:', e.message);
+    }
+  }
+
+  // Also verify if the booking is already recorded as paid in database
+  if (!isPaid && booking?.payment?.status === 'paid') {
+    isPaid = true;
+  }
+
+  if (booking && isPaid) {
+    // Double-Booking & Conflict check before confirming payment!
+    const conflict = await checkBookingConflict({
+      instructorId: booking.instructor?._id || booking.instructor,
+      clientId: booking.client?._id || booking.client,
+      date: booking.date,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      excludeBookingId: booking._id
+    });
+
+    if (conflict) {
+      booking.payment.status = 'paid';
+      booking.status = 'cancelled';
+      booking.cancellationReason = conflict.message;
+      if (targetSessionId) booking.payment.stripeSessionId = targetSessionId;
+      await booking.save();
+
+      // Trigger automatic Stripe refund if possible
+      const piId = session?.payment_intent || booking.payment?.stripePaymentIntentId;
+      if (piId) {
+        try {
+          const piString = typeof piId === 'object' ? piId.id : piId;
+          await stripeHelper.createRefund({ paymentIntentId: piString, reason: 'duplicate' });
+          booking.payment.status = 'refunded';
+          await booking.save();
+        } catch (rfErr) {
+          console.warn('Could not auto-refund conflicted booking:', rfErr.message);
+        }
+      }
+
+      return {
+        _id: booking._id,
+        bookingId: booking.bookingId || '',
+        paid: false,
+        paymentStatus: 'refunded',
+        status: 'cancelled',
+        hasConflict: true,
+        message: 'This time slot was booked by someone else while your payment was processing. Your payment has been refunded. Please select another slot.',
+        reason: conflict.message,
+        paymentUrl: null
+      };
+    }
+
+    booking.payment.status = 'paid';
+    booking.payment.paidAt = new Date();
+    if (targetSessionId) booking.payment.stripeSessionId = targetSessionId;
+    if (session?.payment_intent) {
+      booking.payment.stripePaymentIntentId = typeof session.payment_intent === 'object'
+        ? session.payment_intent.id
+        : session.payment_intent;
+      booking.payment.transactionId = booking.payment.stripePaymentIntentId;
+    } else if (targetSessionId) {
+      booking.payment.transactionId = targetSessionId;
+    }
+    if (booking.status === 'pending_payment') {
+      booking.status = 'pending';
+    }
+    await booking.save();
+  }
+
+  if (booking && isPaid) {
+    const populated = await Booking.findById(booking._id)
+      .populate('client', 'fullName email image number address')
+      .populate('instructor', 'fullName email image number bio address certifications avgRating totalReviews')
+      .populate('chat');
+
+    return formatBookingConfirmedResponse(populated, session);
+  }
+
+  // If Stripe confirmed payment is paid, return success confirmation even if DB record is detached
+  if (isPaid) {
+    const bookingRef = session?.metadata?.bookingReference || (typeof targetBookingId === 'string' && targetBookingId.startsWith('SW-') ? targetBookingId : '');
+    const metaId = session?.metadata?.bookingId || targetBookingId || null;
+    const amount = session?.amount_total ? session.amount_total / 100 : undefined;
+    const currency = session?.currency || 'usd';
+    const txnId = session?.payment_intent
+      ? (typeof session.payment_intent === 'object' ? session.payment_intent.id : session.payment_intent)
+      : targetSessionId;
+
+    return {
+      _id: metaId,
+      bookingId: bookingRef,
+      status: 'pending',
+      paid: true,
+      paymentStatus: 'paid',
+      amount,
+      currency,
+      sessionId: targetSessionId || null,
+      transactionId: txnId || null,
+      header: {
+        title: 'Booking confirmed',
+        subtitle: 'Payment confirmed via Stripe.'
+      },
+      message: 'Payment success'
+    };
+  }
+
+  return {
+    _id: booking?._id || targetBookingId || null,
+    bookingId: booking?.bookingId || '',
+    status: booking?.status || 'pending_payment',
+    paid: false,
+    paymentStatus: session?.payment_status || booking?.payment?.status || 'unpaid',
+    message: 'Payment has not been completed yet.',
+    paymentUrl: session?.url || booking?.payment?.checkoutUrl || null,
+    sessionId: targetSessionId || null
+  };
+};
+
+/**
+ * Handle Payment Failure or Cancellation
+ */
+const handlePaymentFailService = async (sessionId = null, bookingId = null, reason = 'Payment cancelled or failed') => {
+  let booking = null;
+
+  if (bookingId && mongoose.Types.ObjectId.isValid(bookingId)) {
+    booking = await Booking.findById(bookingId)
+      .populate('client', 'fullName email image')
+      .populate('instructor', 'fullName email image');
+  }
+
+  if (!booking && bookingId && typeof bookingId === 'string' && bookingId.startsWith('SW-')) {
+    booking = await Booking.findOne({ bookingId })
+      .populate('client', 'fullName email image')
+      .populate('instructor', 'fullName email image');
+  }
+
+  if (!booking && sessionId) {
+    booking = await Booking.findOne({ 'payment.stripeSessionId': sessionId })
+      .populate('client', 'fullName email image')
+      .populate('instructor', 'fullName email image');
+  }
+
+  if (booking && booking.payment?.status !== 'paid') {
+    booking.payment.status = 'failed';
+    await booking.save();
+  }
+
+  return {
+    success: false,
+    _id: booking?._id || bookingId || null,
+    bookingId: booking?.bookingId || '',
+    status: booking?.status || 'cancelled',
+    paymentStatus: booking?.payment?.status || 'failed',
+    reason,
+    paymentUrl: booking?.payment?.checkoutUrl || null
+  };
+};
+
+/**
+ * Get Review & Pay details for a booking (Figma Node 40012199:3518)
+ */
+const getBookingReviewDetailsService = async (bookingId, userId = null) => {
+  if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Valid Booking ID is required');
+  }
+
+  const booking = await Booking.findById(bookingId)
+    .populate('client', 'fullName email image')
+    .populate('instructor', 'fullName email image');
+
+  if (!booking) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
+  }
+
+  return formatReviewAndPayResponse(booking);
+};
+
+/**
+ * Get Booking Confirmed details for a booking (Figma Node 40012199:3699)
+ */
+const getBookingConfirmationDetailsService = async (bookingId, userId = null) => {
+  if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Valid Booking ID is required');
+  }
+
+  const booking = await Booking.findById(bookingId)
+    .populate('client', 'fullName email image number address')
+    .populate('instructor', 'fullName email image number bio address certifications avgRating totalReviews')
+    .populate('chat');
+
+  if (!booking) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
+  }
+
+  return formatBookingConfirmedResponse(booking);
+};
+
+/**
+ * Real-time conflict check service for frontend (GET & POST /api/v1/bookings/check-conflict)
+ */
+const checkBookingConflictService = async (query = {}, userId = null) => {
+  const { instructorId, date, startTime, endTime, duration } = query;
+  if (!instructorId || !date || !startTime) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'instructorId, date, and startTime are required');
+  }
+
+  const conflict = await checkBookingConflict({
+    instructorId,
+    clientId: userId,
+    date,
+    startTime,
+    endTime,
+    duration: duration ? Number(duration) : 60
+  });
+
+  // If booking time collapses (conflicts), throw error message!
+  if (conflict && (query.throwOnError === undefined || query.throwOnError === 'true' || query.throwOnError === true)) {
+    throw new ApiError(httpStatus.CONFLICT, conflict.message);
+  }
+
+  return {
+    hasConflict: Boolean(conflict),
+    conflict: conflict || null,
+    message: conflict ? conflict.message : 'This time slot is available!'
+  };
+};
+
+/**
+ * Handle Stripe Webhook Events
+ */
+const handleStripeWebhookService = async (rawBody, signature, bodyData = null) => {
+  let event;
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  if (webhookSecret && signature && rawBody) {
+    try {
+      event = stripeHelper.constructWebhookEvent(rawBody, signature, webhookSecret);
+    } catch (err) {
+      throw new ApiError(httpStatus.BAD_REQUEST, `Webhook Signature Verification Failed: ${err.message}`);
+    }
+  } else if (bodyData && bodyData.type) {
+    event = bodyData;
+  } else {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Missing webhook event payload');
+  }
+
+  const eventType = event.type;
+  const dataObject = event.data?.object;
+
+  switch (eventType) {
+    case 'checkout.session.completed': {
+      const session = dataObject;
+      const bookingId = session.metadata?.bookingId || session.client_reference_id;
+      const sessionId = session.id;
+      const paymentIntentId = typeof session.payment_intent === 'object'
+        ? session.payment_intent?.id
+        : session.payment_intent;
+
+      const booking = await Booking.findOne({
+        $or: [
+          ...(bookingId && mongoose.Types.ObjectId.isValid(bookingId) ? [{ _id: bookingId }] : []),
+          { 'payment.stripeSessionId': sessionId },
+          ...(paymentIntentId ? [{ 'payment.stripePaymentIntentId': paymentIntentId }, { 'payment.transactionId': paymentIntentId }] : [])
+        ]
+      });
+
+      if (booking) {
+        booking.payment.status = 'paid';
+        booking.payment.paidAt = new Date();
+        booking.payment.stripeSessionId = sessionId;
+        if (paymentIntentId) {
+          booking.payment.stripePaymentIntentId = paymentIntentId;
+          booking.payment.transactionId = paymentIntentId;
+        } else {
+          booking.payment.transactionId = sessionId;
+        }
+        if (booking.status === 'pending_payment') {
+          booking.status = 'pending';
+        }
+        await booking.save();
+        console.log(`Booking ${booking.bookingId || booking._id} confirmed and marked as paid via checkout.session.completed webhook`);
+      }
+      break;
+    }
+
+    case 'checkout.session.async_payment_succeeded': {
+      const session = dataObject;
+      const bookingId = session.metadata?.bookingId || session.client_reference_id;
+      const booking = await Booking.findOne({
+        $or: [
+          ...(bookingId && mongoose.Types.ObjectId.isValid(bookingId) ? [{ _id: bookingId }] : []),
+          { 'payment.stripeSessionId': session.id }
+        ]
+      });
+      if (booking) {
+        booking.payment.status = 'paid';
+        booking.payment.paidAt = new Date();
+        if (booking.status === 'pending_payment') {
+          booking.status = 'pending';
+        }
+        await booking.save();
+      }
+      break;
+    }
+
+    case 'checkout.session.async_payment_failed':
+    case 'checkout.session.expired': {
+      const session = dataObject;
+      const bookingId = session.metadata?.bookingId || session.client_reference_id;
+      const booking = await Booking.findOne({
+        $or: [
+          ...(bookingId && mongoose.Types.ObjectId.isValid(bookingId) ? [{ _id: bookingId }] : []),
+          { 'payment.stripeSessionId': session.id }
+        ]
+      });
+      if (booking && booking.payment.status === 'unpaid') {
+        booking.payment.status = 'failed';
+        await booking.save();
+      }
+      break;
+    }
+
+    case 'payment_intent.succeeded': {
+      const piId = dataObject.id;
+      const booking = await Booking.findOne({
+        $or: [
+          { 'payment.stripePaymentIntentId': piId },
+          { 'payment.transactionId': piId },
+          ...(dataObject.metadata?.bookingId && mongoose.Types.ObjectId.isValid(dataObject.metadata.bookingId)
+            ? [{ _id: dataObject.metadata.bookingId }]
+            : [])
+        ]
+      });
+
+      if (booking) {
+        booking.payment.status = 'paid';
+        booking.payment.paidAt = new Date();
+        booking.payment.transactionId = piId;
+        booking.payment.stripePaymentIntentId = piId;
+        if (booking.status === 'pending_payment') {
+          booking.status = 'pending';
+        }
+        await booking.save();
+      }
+      break;
+    }
+
+    case 'payment_intent.payment_failed': {
+      const piId = dataObject.id;
+      const booking = await Booking.findOne({
+        $or: [
+          { 'payment.stripePaymentIntentId': piId },
+          { 'payment.transactionId': piId }
+        ]
+      });
+
+      if (booking) {
+        booking.payment.status = 'failed';
+        await booking.save();
+      }
+      break;
+    }
+
+    case 'charge.refunded': {
+      const piId = dataObject.payment_intent;
+      if (piId) {
+        const booking = await Booking.findOne({
+          $or: [
+            { 'payment.stripePaymentIntentId': piId },
+            { 'payment.transactionId': piId }
+          ]
+        });
+
+        if (booking) {
+          booking.payment.status =
+            dataObject.amount_refunded >= dataObject.amount ? 'refunded' : 'partially_refunded';
+          await booking.save();
+        }
+      }
+      break;
+    }
+
+    default:
+      break;
+  }
+
+  return { received: true };
+};
+
 module.exports = {
   createBookingService,
   getMyBookingsService,
@@ -1477,7 +2660,19 @@ module.exports = {
   formatInstructorBookingCard,
   getAdminBookingsListService,
   getAdminBookingDetailsService,
-  adminUpdateBookingStatusService
+  adminUpdateBookingStatusService,
+  createBookingPaymentIntentService,
+  confirmBookingPaymentService,
+  createBookingCheckoutSessionService,
+  verifyCheckoutPaymentSuccessService,
+  handlePaymentFailService,
+  handleStripeWebhookService,
+  formatReviewAndPayResponse,
+  formatBookingConfirmedResponse,
+  getBookingReviewDetailsService,
+  getBookingConfirmationDetailsService,
+  checkBookingConflict,
+  checkBookingConflictService
 };
 
 

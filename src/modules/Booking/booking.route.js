@@ -16,7 +16,17 @@ const {
   sendBookingReminder,
   getAdminBookingsListController,
   getAdminBookingDetailsController,
-  adminUpdateBookingStatusController
+  adminUpdateBookingStatusController,
+  createBookingPaymentIntent,
+  confirmBookingPayment,
+  createCheckoutSessionController,
+  bookingPaymentSuccessController,
+  bookingPaymentFailController,
+  bookingPaymentCancelController,
+  stripeWebhookController,
+  getBookingReviewDetails,
+  getBookingConfirmationDetails,
+  checkBookingConflictController
 } = require('./booking.controller');
 
 // 1. Admin Bookings Endpoints (Figma 40012554:17793 & 40012554:18447)
@@ -26,9 +36,49 @@ router.get('/admin/bookings/:id', auth(['admin']), getAdminBookingDetailsControl
 router.patch('/admin/bookings/:id/status', auth(['admin']), adminUpdateBookingStatusController);
 router.get('/admin/:id', auth(['admin']), getAdminBookingDetailsController);
 
+// Real-time Booking Conflict Check
+router.get('/check-conflict', auth(['user', 'instructor', 'admin'], { optional: true }), checkBookingConflictController);
+router.post('/check-conflict', auth(['user', 'instructor', 'admin'], { optional: true }), checkBookingConflictController);
+
 // 2. Booking Creation (User & Admin)
 router.post('/create', auth(['user', 'admin']), createBooking);
 router.post('/', auth(['user', 'admin']), createBooking);
+
+// Stripe Payment Success & Failure API Endpoints (GET & POST)
+router.get('/payment/success', bookingPaymentSuccessController);
+router.post('/payment/success', bookingPaymentSuccessController);
+router.get('/payment-success', bookingPaymentSuccessController);
+router.post('/payment-success', bookingPaymentSuccessController);
+router.get('/payment/payment-success', bookingPaymentSuccessController);
+router.post('/payment/payment-success', bookingPaymentSuccessController);
+
+router.get('/payment/fail', bookingPaymentFailController);
+router.post('/payment/fail', bookingPaymentFailController);
+router.get('/payment/failed', bookingPaymentFailController);
+router.post('/payment/failed', bookingPaymentFailController);
+router.get('/payment-fail', bookingPaymentFailController);
+router.post('/payment-fail', bookingPaymentFailController);
+router.get('/payment/cancel', bookingPaymentCancelController);
+router.post('/payment/cancel', bookingPaymentCancelController);
+router.get('/payment-cancel', bookingPaymentCancelController);
+router.post('/payment-cancel', bookingPaymentCancelController);
+
+router.get('/success', bookingPaymentSuccessController);
+router.post('/success', bookingPaymentSuccessController);
+router.get('/fail', bookingPaymentFailController);
+router.post('/fail', bookingPaymentFailController);
+router.get('/cancel', bookingPaymentCancelController);
+router.post('/cancel', bookingPaymentCancelController);
+
+router.post('/create-checkout-session', auth(['user', 'admin']), createCheckoutSessionController);
+router.post('/checkout-session', auth(['user', 'admin']), createCheckoutSessionController);
+router.post('/checkout-link', auth(['user', 'admin']), createCheckoutSessionController);
+router.post('/:id/checkout-link', auth(['user', 'admin']), createCheckoutSessionController);
+router.post('/:id/checkout-session', auth(['user', 'admin']), createCheckoutSessionController);
+router.post('/create-payment-intent', auth(['user', 'admin']), createBookingPaymentIntent);
+router.post('/confirm-payment', auth(['user', 'admin']), confirmBookingPayment);
+router.post('/:id/confirm-payment', auth(['user', 'admin']), confirmBookingPayment);
+router.post('/webhook', stripeWebhookController);
 
 // 3. Listing & Tab Badges (User & Instructor)
 router.get('/my-bookings', auth(['user', 'instructor', 'admin']), getMyBookings);
@@ -52,7 +102,14 @@ router.patch('/:id/cancel', auth(['user', 'instructor', 'admin']), cancelBooking
 router.patch('/status/:id', auth(['user', 'instructor', 'admin']), updateBookingStatus);
 router.patch('/:id/status', auth(['user', 'instructor', 'admin']), updateBookingStatus);
 
-// 8. Booking Details by ID (Figma 40012321:3120)
+// 8. Review & Pay and Booking Confirmed Screen Details (Figma 40012199:3518 & 40012199:3699)
+router.get('/review/:id', auth(['user', 'instructor', 'admin'], { optional: true }), getBookingReviewDetails);
+router.get('/:id/review', auth(['user', 'instructor', 'admin'], { optional: true }), getBookingReviewDetails);
+router.get('/confirmed/:id', auth(['user', 'instructor', 'admin'], { optional: true }), getBookingConfirmationDetails);
+router.get('/:id/confirmed', auth(['user', 'instructor', 'admin'], { optional: true }), getBookingConfirmationDetails);
+router.get('/:id/confirmation', auth(['user', 'instructor', 'admin'], { optional: true }), getBookingConfirmationDetails);
+
+// 9. Booking Details by ID (Figma 40012321:3120)
 router.get('/request/:id', auth(['user', 'instructor', 'admin'], { optional: true }), getBookingDetails);
 router.get('/:id', auth(['user', 'instructor', 'admin'], { optional: true }), getBookingDetails);
 

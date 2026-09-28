@@ -16,17 +16,29 @@ const {
   sendBookingReminderService,
   getAdminBookingsListService,
   getAdminBookingDetailsService,
-  adminUpdateBookingStatusService
+  adminUpdateBookingStatusService,
+  createBookingPaymentIntentService,
+  confirmBookingPaymentService,
+  createBookingCheckoutSessionService,
+  verifyCheckoutPaymentSuccessService,
+  handlePaymentFailService,
+  handleStripeWebhookService,
+  getBookingReviewDetailsService,
+  getBookingConfirmationDetailsService,
+  checkBookingConflictService
 } = require('./booking.service');
 
 // User creates a booking
 const createBooking = catchAsync(async (req, res) => {
-  const result = await createBookingService(req.User._id, req.body);
+  const payload = { ...req.body, req };
+  const result = await createBookingService(req.User._id, payload);
   return res.status(status.CREATED).json(
     response({
       status: 'OK',
       statusCode: status.CREATED,
-      message: 'Booking created successfully',
+      message: result.paymentUrl
+        ? 'Booking initiated. Please complete payment using the generated payment link.'
+        : 'Booking created successfully',
       data: result
     })
   );
@@ -229,11 +241,158 @@ const adminUpdateBookingStatusController = catchAsync(async (req, res) => {
   );
 });
 
+// Create Stripe PaymentIntent for Booking (Step 5: Review & Pay)
+const createBookingPaymentIntent = catchAsync(async (req, res) => {
+  const result = await createBookingPaymentIntentService(req.User._id, req.body);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      message: 'Payment intent created successfully',
+      data: result
+    })
+  );
+});
+
+// Confirm Booking Payment after Stripe sheet completes
+const confirmBookingPayment = catchAsync(async (req, res) => {
+  const bookingId = req.params.id || req.body.bookingId;
+  const paymentIntentId = req.body.paymentIntentId || req.body.stripePaymentIntentId;
+  const result = await confirmBookingPaymentService(bookingId, req.User._id, paymentIntentId);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      message: 'Payment success',
+      data: result
+    })
+  );
+});
+
+// Stripe Webhook Event Receiver
+const stripeWebhookController = catchAsync(async (req, res) => {
+  const signature = req.headers['stripe-signature'];
+  const result = await handleStripeWebhookService(req.rawBody, signature, req.body);
+  return res.status(status.OK).json(result);
+});
+
+// Create or re-generate Stripe Checkout Link for a Booking
+const createCheckoutSessionController = catchAsync(async (req, res) => {
+  const bookingId = req.params.id || req.body.bookingId;
+  const result = await createBookingCheckoutSessionService(req.User._id, {
+    ...req.body,
+    bookingId,
+    req
+  });
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      message: 'Stripe checkout payment link generated successfully',
+      data: result
+    })
+  );
+});
+
+// Stripe Payment Success API (GET & POST) - Returns JSON API response only
+const bookingPaymentSuccessController = catchAsync(async (req, res) => {
+  const sessionId = req.query.session_id || req.body.session_id || req.query.sessionId || req.body.sessionId;
+  const bookingId = req.query.booking_id || req.body.booking_id || req.query.bookingId || req.body.bookingId || req.params.id;
+  const paymentIntentId = req.query.payment_intent || req.body.payment_intent || req.query.paymentIntentId || req.body.paymentIntentId;
+
+  const result = await verifyCheckoutPaymentSuccessService(sessionId, bookingId, paymentIntentId);
+
+  // If payment failed, unpaid, or conflicted -> return JSON error response
+  if (!result.paid) {
+    return res.status(status.BAD_REQUEST).json(
+      response({
+        status: 'Error',
+        statusCode: status.BAD_REQUEST,
+        message: result.message || 'Payment has not been completed or has failed',
+        data: result
+      })
+    );
+  }
+
+  // Payment is success -> return JSON response with message "Payment success"
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      message: 'Payment success',
+      data: result
+    })
+  );
+});
+
+// Stripe Payment Fail / Cancel API (GET & POST) - Returns JSON API response only
+const bookingPaymentFailController = catchAsync(async (req, res) => {
+  const sessionId = req.query.session_id || req.body.session_id || req.query.sessionId || req.body.sessionId;
+  const bookingId = req.query.booking_id || req.body.booking_id || req.query.bookingId || req.body.bookingId || req.params.id;
+  const reason = req.body.reason || req.query.reason || req.body.message || 'Payment cancelled or failed';
+
+  const result = await handlePaymentFailService(sessionId, bookingId, reason);
+
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      message: 'Payment cancelled or failed',
+      data: result
+    })
+  );
+});
+
+const bookingPaymentCancelController = bookingPaymentFailController;
+
+// Check Booking Conflict (GET & POST /api/v1/bookings/check-conflict)
+const checkBookingConflictController = catchAsync(async (req, res) => {
+  const query = { ...req.query, ...req.body };
+  const result = await checkBookingConflictService(query, req.User?._id);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      message: result.message,
+      data: result
+    })
+  );
+});
+
+// Get Review & Pay details for a booking (Figma Node 40012199:3518)
+const getBookingReviewDetails = catchAsync(async (req, res) => {
+  const result = await getBookingReviewDetailsService(req.params.id, req.User?._id);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      message: 'Review and pay details fetched successfully',
+      data: result
+    })
+  );
+});
+
+// Get Booking Confirmed details for a booking (Figma Node 40012199:3699)
+const getBookingConfirmationDetails = catchAsync(async (req, res) => {
+  const result = await getBookingConfirmationDetailsService(req.params.id, req.User?._id);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      message: 'Booking confirmation details fetched successfully',
+      data: result
+    })
+  );
+});
+
 module.exports = {
   createBooking,
   getMyBookings,
   getBookingTabCounts,
   getBookingDetails,
+  getBookingReviewDetails,
+  getBookingConfirmationDetails,
+  checkBookingConflictController,
   acceptBooking,
   declineBooking,
   startBooking,
@@ -244,7 +403,14 @@ module.exports = {
   sendBookingReminder,
   getAdminBookingsListController,
   getAdminBookingDetailsController,
-  adminUpdateBookingStatusController
+  adminUpdateBookingStatusController,
+  createBookingPaymentIntent,
+  confirmBookingPayment,
+  createCheckoutSessionController,
+  bookingPaymentSuccessController,
+  bookingPaymentFailController,
+  bookingPaymentCancelController,
+  stripeWebhookController
 };
 
 

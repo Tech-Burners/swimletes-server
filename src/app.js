@@ -23,7 +23,14 @@ const app = express();
 
 
 // Body Parsers
-app.use(express.json({ limit: "100mb" })); // JSON
+app.use(
+  express.json({
+    limit: "100mb",
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    }
+  })
+); // JSON
 app.use(bodyParser.urlencoded({ extended: true, limit: "100mb" })); // form submissions
 
 // const flutterwaveWebhook = require("./helpers/flutterWaveWebhook");

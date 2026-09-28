@@ -24,9 +24,10 @@ const io = socket(socketServer, {
 
 
 let server = null;
-const port = process.env.BACKEND_PORT || 3001;
+let secondaryServer = null;
+const port = Number(process.env.BACKEND_PORT) || 8049;
 const serverIP = process.env.API_SERVER_IP || "localhost";
-const appName = process.env.APPNAME || "weego";
+const appName = process.env.APPNAME || "swimletes";
 
 async function myServer() {
   try {
@@ -37,6 +38,20 @@ async function myServer() {
         `---> ${appName} server is running at: http://${serverIP}:${port}`
       );
     });
+
+    // Support dual-port listening (8047 & 8049) to support devtunnel port configurations
+    const altPort = port === 8049 ? 8047 : (port === 8047 ? 8049 : null);
+    if (altPort) {
+      try {
+        secondaryServer = app.listen(altPort, () => {
+          console.dir(
+            `---> 🌐 ${appName} secondary port listener running at: http://${serverIP}:${altPort}`
+          );
+        });
+      } catch (altErr) {
+        // Continue cleanly if alt port is occupied
+      }
+    }
 
     //start socket server
     socketServer.listen(socketPort, () => {
