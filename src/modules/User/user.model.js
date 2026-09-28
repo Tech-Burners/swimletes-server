@@ -6,7 +6,29 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: false, trim: true },
   number: { type: String, required: false },
   countryCode: { type: String, required: false },
-  image: { type: String, required: false, default: 'user.jpg' },
+  image: {
+    type: String,
+    required: false,
+    default: '/uploads/users/user.jpg',
+    set: function (val) {
+      if (!val || typeof val !== 'string') return val;
+      const trimmed = val.trim();
+      if (!trimmed) return trimmed;
+      if (trimmed.startsWith('/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+        return trimmed;
+      }
+      return `/uploads/users/${trimmed}`;
+    },
+    get: function (val) {
+      if (!val || typeof val !== 'string') return val;
+      const trimmed = val.trim();
+      if (!trimmed) return trimmed;
+      if (trimmed.startsWith('/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+        return trimmed;
+      }
+      return `/uploads/users/${trimmed}`;
+    }
+  },
   role: { type: String, enum: ['user', 'instructor', 'admin'], default: 'user' },
   status: { type: String, enum: ['active', 'suspended', 'banned', 'pending'], default: 'active' },
   isBan: { type: Boolean, default: false },
@@ -135,7 +157,9 @@ const userSchema = new mongoose.Schema({
   },
 },
   {
-    timestamps: true
+    timestamps: true,
+    toJSON: { getters: true },
+    toObject: { getters: true }
   }
 );
 

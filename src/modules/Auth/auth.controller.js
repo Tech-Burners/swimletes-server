@@ -412,7 +412,10 @@ const updateProfile = catchAsync(async (req, res) => {
 
   // If no file uploaded, check if photo or avatar was sent in body
   if (!req.file && (req.body.photo || req.body.avatar || req.body.profileImage)) {
-    req.body.image = req.body.photo || req.body.avatar || req.body.profileImage;
+    const rawImage = req.body.photo || req.body.avatar || req.body.profileImage;
+    req.body.image = (typeof rawImage === 'string' && !rawImage.startsWith('/') && !rawImage.startsWith('http'))
+      ? `/uploads/users/${rawImage}`
+      : rawImage;
   }
 
   const isExistingUser = req.dbUser || (req.User?._id && (await getUserById(req.User._id)));
@@ -439,17 +442,30 @@ const updateProfile = catchAsync(async (req, res) => {
         const defaultPath1 = 'user.png';
         const defaultPath2 = 'user.jpg';
 
-        if (user.image && user.image !== defaultPath1 && user.image !== defaultPath2 && !user.image.includes('default')) {
-          unlinkImage(`uploads/users/${user.image}`);
+        if (
+          user.image &&
+          !user.image.includes('default') &&
+          !user.image.endsWith(defaultPath1) &&
+          !user.image.endsWith(defaultPath2)
+        ) {
+          const oldImagePath = user.image.startsWith('/') || user.image.startsWith('uploads')
+            ? user.image
+            : `/uploads/users/${user.image}`;
+          unlinkImage(oldImagePath);
         }
-        req.body.image = filename;
+        req.body.image = `/uploads/users/${filename}`;
+      }
+    } else if (req.body.image && typeof req.body.image === 'string') {
+      const trimmed = req.body.image.trim();
+      if (trimmed && !trimmed.startsWith('/') && !trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+        req.body.image = `/uploads/users/${trimmed}`;
       }
     }
 
     const result = await updateUserById(user._id, req.body);
 
     const userObj = result.toObject ? result.toObject() : { ...result };
-    const imagePath = userObj.image || 'user.jpg';
+    const imagePath = userObj.image || '/uploads/users/user.jpg';
     userObj.imageUrl = imagePath.startsWith('http') || imagePath.startsWith('/')
       ? imagePath
       : `/uploads/users/${imagePath}`;
@@ -478,7 +494,7 @@ const updateProfile = catchAsync(async (req, res) => {
     const accessToken = await tokenGenerator(createdUser);
 
     const userObj = createdUser.toObject ? createdUser.toObject() : { ...createdUser };
-    const imagePath = userObj.image || 'user.jpg';
+    const imagePath = userObj.image || '/uploads/users/user.jpg';
     userObj.imageUrl = imagePath.startsWith('http') || imagePath.startsWith('/')
       ? imagePath
       : `/uploads/users/${imagePath}`;
@@ -497,7 +513,18 @@ const updateProfile = catchAsync(async (req, res) => {
 
   // For Instructor: Profile setup is an intermediate step -> SAVE ONBOARDING STATE, WAIT FOR DOCUMENTS
   if (role === 'instructor') {
-    const profileImage = req.file ? req.file.filename : (req.body.image || req.User?.image || 'user.jpg');
+    let profileImage = '/uploads/users/user.jpg';
+    if (req.file && req.file.filename) {
+      profileImage = `/uploads/users/${req.file.filename}`;
+    } else if (req.body.image) {
+      profileImage = typeof req.body.image === 'string' && !req.body.image.startsWith('/') && !req.body.image.startsWith('http')
+        ? `/uploads/users/${req.body.image}`
+        : req.body.image;
+    } else if (req.User?.image) {
+      profileImage = typeof req.User.image === 'string' && !req.User.image.startsWith('/') && !req.User.image.startsWith('http')
+        ? `/uploads/users/${req.User.image}`
+        : req.User.image;
+    }
 
     const experience = {
       years: req.body.experience?.years !== undefined ? Number(req.body.experience.years) : (req.body.experienceYears !== undefined ? Number(req.body.experienceYears) : (req.User?.experience?.years || 0)),
@@ -617,7 +644,7 @@ const userDetailsByID = catchAsync(async (req, res) => {
   }
 
   const userObj = user.toObject ? user.toObject() : { ...user };
-  const imagePath = userObj.image || 'user.jpg';
+  const imagePath = userObj.image || '/uploads/users/user.jpg';
   userObj.imageUrl = imagePath.startsWith('http') || imagePath.startsWith('/')
     ? imagePath
     : `/uploads/users/${imagePath}`;

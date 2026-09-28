@@ -68,4 +68,4 @@ module.exports = {
   myFavouriteController,
   checkIsFavouriteController,
   removeFavouriteController
-};
+};

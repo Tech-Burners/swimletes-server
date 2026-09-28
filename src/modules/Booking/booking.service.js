@@ -80,7 +80,7 @@ const formatUserBookingCard = (booking) => {
     instructor: {
       _id: b.instructor?._id,
       fullName: b.instructor?.fullName || 'Instructor',
-      image: b.instructor?.image || 'user.jpg'
+      image: b.instructor?.image || '/uploads/users/user.jpg'
     }
   };
 };
@@ -170,7 +170,7 @@ const formatInstructorBookingCard = (booking) => {
     client: {
       _id: b.client?._id,
       fullName: b.client?.fullName || 'Client',
-      image: b.client?.image || 'user.jpg'
+      image: b.client?.image || '/uploads/users/user.jpg'
     }
   };
 };

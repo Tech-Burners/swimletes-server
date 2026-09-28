@@ -318,7 +318,7 @@ const myFavouriteService = async (userId, queryParams = {}) => {
       instructorId: inst._id,
       serviceId: s?._id || null,
       fullName: inst.fullName || (index === 0 ? 'Naomi Johnson' : index === 1 ? 'Ethan Brown' : 'Sofia Garcia'),
-      image: inst.image || 'user.jpg',
+      image: inst.image || '/uploads/users/user.jpg',
       rating: rating,
       reviewCount: reviewCount,
       ratingCount: inst.ratingCount || reviewCount,

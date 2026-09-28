@@ -298,7 +298,11 @@ const updateUserById = async (id, data) => {
   const userPayload = {
     ...(data.fullName !== undefined && { fullName: data.fullName }),
     ...(data.dob !== undefined && { dob: data.dob }),
-    ...(data.image !== undefined && { image: data.image }),
+    ...(data.image !== undefined && {
+      image: typeof data.image === 'string' && data.image.trim() && !data.image.startsWith('/') && !data.image.startsWith('http')
+        ? `/uploads/users/${data.image.trim()}`
+        : data.image
+    }),
     ...(data.email !== undefined && { email: data.email }),
     ...(data.location !== undefined && { location: data.location }),
     ...(data.address !== undefined && { address: data.address }),
@@ -402,8 +406,19 @@ const updateInstructorDocumentsService = async (userId, data, files = {}) => {
 
   // 2. Profile Photo (if included in onboarding)
   const profileImageFile = getUploadedFile(files, 'image', 'avatar', 'photo', 'profileImage');
-  if (profileImageFile) {
-    updateFields.image = profileImageFile.filename;
+  if (profileImageFile && profileImageFile.filename) {
+    if (
+      user.image &&
+      !user.image.includes('default') &&
+      !user.image.endsWith('user.jpg') &&
+      !user.image.endsWith('user.png')
+    ) {
+      const oldImg = user.image.startsWith('/') || user.image.startsWith('uploads')
+        ? user.image
+        : `/uploads/users/${user.image}`;
+      unlinkImage(oldImg);
+    }
+    updateFields.image = `/uploads/users/${profileImageFile.filename}`;
   }
 
   // 3. Swim Instruction Certification (Path A: Certified)
@@ -518,13 +533,23 @@ const createUserOnProfileSetupService = async (reqUser, data, file) => {
     throw new ApiError(status.BAD_REQUEST, "Password is required to create an account");
   }
 
+  let userImage = '/uploads/users/user.jpg';
+  if (file && file.filename) {
+    userImage = `/uploads/users/${file.filename}`;
+  } else if (data?.image || reqUser?.image) {
+    const raw = data?.image || reqUser?.image;
+    userImage = typeof raw === 'string' && !raw.startsWith('/') && !raw.startsWith('http')
+      ? `/uploads/users/${raw}`
+      : raw;
+  }
+
   const userPayload = {
     email,
     password,
     role: 'user',
     fullName: data?.fullName || reqUser?.fullName || 'User',
     dob: data?.dob || reqUser?.dob || '',
-    image: file ? file.filename : (data?.image || reqUser?.image || 'user.jpg'),
+    image: userImage,
     status: 'active',
     isVerified: true,
     ...(data?.address !== undefined && { address: data.address }),
@@ -567,7 +592,15 @@ const createInstructorOnDocumentSubmissionService = async (reqUser, data = {}, f
 
   // 1. Profile Photo
   const profileImageFile = getUploadedFile(files, 'image', 'avatar', 'photo', 'profileImage');
-  const profileImage = profileImageFile ? profileImageFile.filename : (reqUser?.image || data?.image || 'user.jpg');
+  let profileImage = '/uploads/users/user.jpg';
+  if (profileImageFile && profileImageFile.filename) {
+    profileImage = `/uploads/users/${profileImageFile.filename}`;
+  } else if (reqUser?.image || data?.image) {
+    const raw = reqUser?.image || data?.image;
+    profileImage = typeof raw === 'string' && !raw.startsWith('/') && !raw.startsWith('http')
+      ? `/uploads/users/${raw}`
+      : raw;
+  }
 
   // 2. Swim Instruction Certification (Path A: Certified)
   const certFile = getUploadedFile(files, 'certificate', 'certificates', 'certification', 'certificateFile', 'certFile', 'cert');

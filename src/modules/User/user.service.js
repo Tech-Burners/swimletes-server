@@ -246,7 +246,7 @@ const getUserHomeFeedService = async (userId, queryParams = {}) => {
   let userProfile = {
     greeting: `${timeGreeting}, Sarah`,
     address: userAddress || '4827 Willow Creek Drive',
-    image: 'user.jpg'
+    image: '/uploads/users/user.jpg'
   };
 
   let referenceLat = userLat || 32.8123;
@@ -275,7 +275,7 @@ const getUserHomeFeedService = async (userId, queryParams = {}) => {
       userProfile = {
         greeting: `${timeGreeting}, ${firstName}`,
         address: finalAddress,
-        image: userDoc.image || 'user.jpg'
+        image: userDoc.image || '/uploads/users/user.jpg'
       };
     }
   }
@@ -434,7 +434,7 @@ const getUserHomeFeedService = async (userId, queryParams = {}) => {
     return {
       _id: inst._id,
       fullName: inst.fullName || (index === 0 ? 'Naomi Johnson' : index === 1 ? 'Ethan Brown' : 'Sofia Garcia'),
-      image: inst.image || 'user.jpg',
+      image: inst.image || '/uploads/users/user.jpg',
       rating: rating,
       reviewCount: reviewCount,
       distance: `${calculatedDistance} Miles`,
@@ -469,7 +469,7 @@ const getUserHomeFeedService = async (userId, queryParams = {}) => {
       {
         _id: '66a01001',
         fullName: 'Naomi Johnson',
-        image: 'user.jpg',
+        image: '/uploads/users/user.jpg',
         rating: 4.8,
         reviewCount: 312,
         distance: '3.2 Miles',
@@ -479,7 +479,7 @@ const getUserHomeFeedService = async (userId, queryParams = {}) => {
       {
         _id: '66a01002',
         fullName: 'Ethan Brown',
-        image: 'user.jpg',
+        image: '/uploads/users/user.jpg',
         rating: 4.8,
         reviewCount: 312,
         distance: '3.2 Miles',
@@ -489,7 +489,7 @@ const getUserHomeFeedService = async (userId, queryParams = {}) => {
       {
         _id: '66a01003',
         fullName: 'Sofia Garcia',
-        image: 'user.jpg',
+        image: '/uploads/users/user.jpg',
         rating: 4.9,
         reviewCount: 430,
         distance: '2.1 Miles',

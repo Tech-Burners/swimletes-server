@@ -63,7 +63,7 @@ const getInstructorServiceAndPricing = async (instructorId) => {
       _id: instructor._id,
       fullName: instructor.fullName || 'Naomi Johnson',
       email: instructor.email,
-      image: instructor.image || 'user.jpg',
+      image: instructor.image || '/uploads/users/user.jpg',
       address: instructor.address || 'Oak Lawn, Dallas',
       bio: instructor.bio || instructor.about || 'Head coach of a Dallas high-school swim team. Most of my private work is with kids who are frightened of the water — we go at their pace, and nobody gets dunked. I also coach adult beginners and stroke refinement for triathletes.',
       experienceYears: instructor.experience?.years !== undefined ? instructor.experience.years : 6,
