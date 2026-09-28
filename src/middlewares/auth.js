@@ -135,10 +135,10 @@ const resetTokenCheck = (req, res, next) => {
 const tokenCheck = catchAsync(async (req, res, next) => {
   const authHeader = req.headers.authorization;
 
-  if (authHeader && authHeader.startsWith("Bearer ")) {
+  if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) {
     const token = authHeader.split(" ")[1];
 
-    if (token && token !== "null") {
+    if (token && token !== "null" && token !== "undefined") {
       try {
         req.User = jwt.verify(token, process.env.JWT_ACCESS_TOKEN);
       } catch (error) {

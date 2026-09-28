@@ -35,7 +35,8 @@ const getMyService = catchAsync(async (req, res) => {
 
 // Public: View instructor's service & pricing
 const getInstructorService = catchAsync(async (req, res) => {
-  const result = await getInstructorServiceAndPricing(req.params.instructorId);
+  const currentUserId = req.User?._id || req.User?.id || req.query.userId || req.headers['x-user-id'] || null;
+  const result = await getInstructorServiceAndPricing(req.params.instructorId, currentUserId);
   return res.status(status.OK).json(
     response({
       status: 'OK',

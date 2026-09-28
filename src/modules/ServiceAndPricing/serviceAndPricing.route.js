@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { auth } = require('../../middlewares/auth');
+const { auth, tokenCheck } = require('../../middlewares/auth');
 const {
   saveServiceAndPricing,
   getMyService,
@@ -13,7 +13,7 @@ router.put('/', auth(['instructor']), saveServiceAndPricing);
 router.get('/my-service', auth(['instructor']), getMyService);
 
 // Public / Client routes
-router.get('/details/:instructorId', getInstructorService);
-router.get('/:instructorId', getInstructorService);
+router.get('/details/:instructorId', tokenCheck, getInstructorService);
+router.get('/:instructorId', tokenCheck, getInstructorService);
 
 module.exports = router;

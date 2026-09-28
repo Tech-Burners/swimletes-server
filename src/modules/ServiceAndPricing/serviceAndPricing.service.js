@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const ServiceAndPricing = require('./serviceAndPricing.model');
 const User = require('../User/user.model');
+const Favourite = require('../Favourite/favourite.model');
 const ApiError = require('../../helpers/ApiError');
 const httpStatus = require('http-status');
 
@@ -39,7 +40,7 @@ const getMyServiceAndPricing = async (instructorId) => {
  * Get Instructor Service Details for User End (matching Figma Details / About page: 40012606:5436)
  * Lightweight and optimized for fast response.
  */
-const getInstructorServiceAndPricing = async (instructorId) => {
+const getInstructorServiceAndPricing = async (instructorId, currentUserId = null) => {
   if (!mongoose.Types.ObjectId.isValid(instructorId)) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid instructor ID');
   }
@@ -58,7 +59,26 @@ const getInstructorServiceAndPricing = async (instructorId) => {
   // 2. Fetch Service & Pricing
   const serviceAndPricing = await ServiceAndPricing.findOne({ instructor: instructorObjectId });
 
+  // 3. Check favourite status for the user
+  let isFavourite = false;
+  if (currentUserId && mongoose.Types.ObjectId.isValid(currentUserId)) {
+    const userObjectId = new mongoose.Types.ObjectId(String(currentUserId));
+    const targetIds = [instructorObjectId];
+    if (serviceAndPricing?._id && mongoose.Types.ObjectId.isValid(serviceAndPricing._id)) {
+      targetIds.push(new mongoose.Types.ObjectId(String(serviceAndPricing._id)));
+    }
+    const favDoc = await Favourite.findOne({
+      user: userObjectId,
+      $or: [
+        { instructor: { $in: targetIds } },
+        { service: { $in: targetIds } }
+      ]
+    });
+    isFavourite = !!favDoc;
+  }
+
   return {
+    isFavourite,
     instructor: {
       _id: instructor._id,
       fullName: instructor.fullName || 'Naomi Johnson',
@@ -72,7 +92,8 @@ const getInstructorServiceAndPricing = async (instructorId) => {
       badgeText: 'Checked by SwimLetes',
       avgRating: instructor.avgRating || 4.8,
       totalReviews: instructor.totalReviews || 128,
-      lessonsTaught: instructor.lessonsTaught || 128
+      lessonsTaught: instructor.lessonsTaught || 128,
+      isFavourite
     },
     serviceAndPricing: serviceAndPricing || {
       duration: 60,
