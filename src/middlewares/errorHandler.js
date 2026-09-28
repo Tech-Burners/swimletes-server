@@ -39,9 +39,19 @@ function errorHandler(err, req, res, next) {
     stack: err.stack,
   });
 
-  // Unlink image if a file was uploaded
-  if (req.file) {
+  // Unlink files if uploaded before error
+  if (req.file && req.file.path) {
     unlinkImage(req.file.path);
+  }
+  if (req.files) {
+    if (Array.isArray(req.files)) {
+      req.files.forEach((f) => f?.path && unlinkImage(f.path));
+    } else if (typeof req.files === 'object') {
+      Object.values(req.files).forEach((val) => {
+        if (Array.isArray(val)) val.forEach((f) => f?.path && unlinkImage(f.path));
+        else if (val?.path) unlinkImage(val.path);
+      });
+    }
   }
 
   // Send JSON response with error details, ensuring no undefined status code

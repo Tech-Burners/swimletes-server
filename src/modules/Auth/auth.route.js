@@ -42,12 +42,30 @@ router.post("/forget-password", forgetPassword);
 router.post("/reset-password", resetTokenCheck, resetPassword);
 router.patch("/change-password", auth(['user', 'instructor', 'admin']), changePassword);
 
-// 4. Profile Setup & Management (Step 4 for User & Instructor)
+// 4. Profile Setup & Management (Step 4 & Figma Edit Profile 40012257:5335)
 router.get('/my-profile', auth(['user', 'instructor', 'admin']), userDetailsByID);
+router.get('/profile', auth(['user', 'instructor', 'admin']), userDetailsByID);
+
 router.put(
-  '/update-profile',
+  ['/update-profile', '/edit-profile', '/profile'],
   authOrOnboarding(['user', 'instructor', 'admin']),
-  uploadUsers.single('image'),
+  uploadUsers.any(),
+  convertHeicToPng(UPLOADS_FOLDER_USERS),
+  parseData(),
+  updateProfile
+);
+router.patch(
+  ['/update-profile', '/edit-profile', '/profile'],
+  authOrOnboarding(['user', 'instructor', 'admin']),
+  uploadUsers.any(),
+  convertHeicToPng(UPLOADS_FOLDER_USERS),
+  parseData(),
+  updateProfile
+);
+router.post(
+  ['/update-profile', '/edit-profile'],
+  authOrOnboarding(['user', 'instructor', 'admin']),
+  uploadUsers.any(),
   convertHeicToPng(UPLOADS_FOLDER_USERS),
   parseData(),
   updateProfile
@@ -55,7 +73,7 @@ router.put(
 router.post(
   '/setup-profile',
   authOrOnboarding(['user', 'instructor', 'admin']),
-  uploadUsers.single('image'),
+  uploadUsers.any(),
   convertHeicToPng(UPLOADS_FOLDER_USERS),
   parseData(),
   updateProfile

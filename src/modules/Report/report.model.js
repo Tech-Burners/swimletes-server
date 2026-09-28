@@ -60,6 +60,13 @@ const reportSchema = new mongoose.Schema(
         trim: true
       }
     ],
+    files: [
+      {
+        type: String,
+        trim: true
+      }
+    ],
+
 
     // 5. Booking financial & schedule snapshot
     amount: {

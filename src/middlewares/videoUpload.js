@@ -1,42 +1,41 @@
 const multer = require("multer");
 const path = require("path");
+const fs = require("fs");
 
 module.exports = function (UPLOADS_FOLDER) {
+  if (!fs.existsSync(UPLOADS_FOLDER)) {
+    fs.mkdirSync(UPLOADS_FOLDER, { recursive: true });
+  }
+
   const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-      cb(null, UPLOADS_FOLDER); // Use the provided destination folder
+      if (!fs.existsSync(UPLOADS_FOLDER)) {
+        fs.mkdirSync(UPLOADS_FOLDER, { recursive: true });
+      }
+      cb(null, UPLOADS_FOLDER);
     },
     filename: (req, file, cb) => {
-      const fileExt = path.extname(file.originalname);
-      const filename =
-        file.originalname
-          .replace(fileExt, "")
-          .toLocaleLowerCase()
-          .split(" ")
-          .join("-") +
-        "-" +
-        Date.now();
+      const fileExt = path.extname(file.originalname || "") || "";
+      const baseName = path
+        .basename(file.originalname || "video", fileExt)
+        .replace(/[^a-zA-Z0-9_-]/g, "-")
+        .replace(/-+/g, "-")
+        .toLowerCase() || "video";
+      const filename = `${baseName}-${Date.now()}-${Math.round(Math.random() * 1e9)}${fileExt}`;
 
-      cb(null, filename + fileExt);
+      cb(null, filename);
     },
   });
 
   const uploadVideo = multer({
     storage: storage,
     limits: {
-      fileSize: 500000000, // 500MB
+      fileSize: 500 * 1024 * 1024, // 500MB
+      fieldSize: 50 * 1024 * 1024, // 50MB
     },
     fileFilter: (req, file, cb) => {
-      if (
-        file.mimetype == "video/mp4" ||
-        file.mimetype == "video/mkv" ||
-        file.mimetype == "video/avi" ||
-        file.mimetype == "video/mov"
-      ) {
-        cb(null, true);
-      } else {
-        cb(new Error("Only mp4, mkv, avi, and mov formats are allowed!"));
-      }
+      // Allow all video formats and files
+      cb(null, true);
     },
   });
 

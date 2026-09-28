@@ -102,20 +102,47 @@ const createReportService = async (userId, userRole, data = {}, files = []) => {
     throw new ApiError(httpStatus.FORBIDDEN, 'You are not authorized to report this booking');
   }
 
-  // Process photos
+  // Process uploaded files and photos (PDFs, images, documents, etc.)
   const photoPaths = [];
-  if (files && Array.isArray(files)) {
-    files.forEach((file) => {
-      photoPaths.push(`/uploads/reports/${file.filename}`);
-    });
-  } else if (files && files.filename) {
-    photoPaths.push(`/uploads/reports/${files.filename}`);
+  if (files) {
+    if (Array.isArray(files)) {
+      files.forEach((file) => {
+        if (file?.filename) {
+          photoPaths.push(`/uploads/reports/${file.filename}`);
+        }
+      });
+    } else if (typeof files === 'object') {
+      if (files.filename) {
+        photoPaths.push(`/uploads/reports/${files.filename}`);
+      } else {
+        Object.values(files).forEach((val) => {
+          if (Array.isArray(val)) {
+            val.forEach((file) => {
+              if (file?.filename) {
+                photoPaths.push(`/uploads/reports/${file.filename}`);
+              }
+            });
+          } else if (val?.filename) {
+            photoPaths.push(`/uploads/reports/${val.filename}`);
+          }
+        });
+      }
+    }
   }
 
-  // Also support photo / image url passed in body
-  const photoUrl = payload.photo || payload.image || data.photo || data.image;
-  if (photoUrl && typeof photoUrl === 'string' && photoUrl.trim()) {
-    photoPaths.push(photoUrl.trim());
+  // Also support photo / image / file urls passed in body
+  const singleFileUrl = payload.photo || payload.image || payload.file || payload.document || data.photo || data.image || data.file || data.document;
+  if (singleFileUrl && typeof singleFileUrl === 'string' && singleFileUrl.trim()) {
+    photoPaths.push(singleFileUrl.trim());
+  }
+
+  const multiFilesUrl = payload.photos || payload.images || payload.files || payload.attachments || data.photos || data.images || data.files || data.attachments;
+  if (Array.isArray(multiFilesUrl)) {
+    multiFilesUrl.forEach((p) => {
+      if (typeof p === 'string' && p.trim()) photoPaths.push(p.trim());
+      else if (p?.url) photoPaths.push(p.url);
+      else if (p?.fileUrl) photoPaths.push(p.fileUrl);
+    });
   }
 
   const generatedBookingId =
@@ -126,7 +153,7 @@ const createReportService = async (userId, userRole, data = {}, files = []) => {
     booking.pricing?.lessonPrice ||
     0;
 
-  // Create dispute record
+  // Create dispute record with both photos and files fields
   const report = await Report.create({
     booking: booking._id,
     bookingId: generatedBookingId,
@@ -137,6 +164,7 @@ const createReportService = async (userId, userRole, data = {}, files = []) => {
     reason: reason.trim(),
     details: (details || '').trim(),
     photos: photoPaths,
+    files: photoPaths,
     amount,
     lessonDate: booking.date || new Date(),
     status: 'open'
@@ -153,6 +181,8 @@ const createReportService = async (userId, userRole, data = {}, files = []) => {
     reason: report.reason,
     details: report.details,
     photos: report.photos,
+    files: report.files || report.photos,
+    attachments: report.files || report.photos,
     status: report.status,
     createdAt: report.createdAt
   };
@@ -350,10 +380,12 @@ const getAdminDisputeDetailsService = async (disputeId) => {
     amount: `$${dispute.amount || 0}`,
     numericAmount: dispute.amount || 0,
     flaggedReason: dispute.reason,
-    details: dispute.details || 'No additional details provided.',
-    photo: dispute.photos && dispute.photos.length > 0 ? dispute.photos[0] : null,
-    photos: dispute.photos || [],
-    hasPhoto: dispute.photos && dispute.photos.length > 0,
+    photo: (dispute.photos && dispute.photos.length > 0) ? dispute.photos[0] : ((dispute.files && dispute.files.length > 0) ? dispute.files[0] : null),
+    photos: dispute.photos || dispute.files || [],
+    hasPhoto: Boolean((dispute.photos && dispute.photos.length > 0) || (dispute.files && dispute.files.length > 0)),
+    file: (dispute.photos && dispute.photos.length > 0) ? dispute.photos[0] : ((dispute.files && dispute.files.length > 0) ? dispute.files[0] : null),
+    files: dispute.files || dispute.photos || [],
+    attachments: dispute.files || dispute.photos || [],
     resolution: dispute.resolution || null,
     createdAt: dispute.createdAt
   };

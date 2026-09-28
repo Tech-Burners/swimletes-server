@@ -334,13 +334,27 @@ const updateUserById = async (id, data) => {
  */
 const getUploadedFile = (files, ...fieldNames) => {
   if (!files) return null;
+  const normalizedNames = fieldNames.map(n => n.toLowerCase().replace(/[-_]/g, ''));
+
   if (Array.isArray(files)) {
+    // 1. Direct or lowercase match
     for (const name of fieldNames) {
-      const found = files.find(f => f.fieldname === name || f.fieldname.toLowerCase() === name.toLowerCase());
+      const found = files.find(f => f?.fieldname === name || f?.fieldname?.toLowerCase() === name.toLowerCase());
+      if (found) return found;
+    }
+    // 2. Normalized match (ignores dashes, underscores, casing)
+    for (const name of normalizedNames) {
+      const found = files.find(f => {
+        if (!f?.fieldname) return false;
+        const norm = f.fieldname.toLowerCase().replace(/[-_]/g, '');
+        return norm === name || norm.includes(name) || name.includes(norm);
+      });
       if (found) return found;
     }
     return null;
   }
+
+  // Object structure
   for (const name of fieldNames) {
     if (files[name]?.[0]) return files[name][0];
     if (files[name] && !Array.isArray(files[name])) return files[name];
@@ -348,6 +362,17 @@ const getUploadedFile = (files, ...fieldNames) => {
     if (key && files[key]?.[0]) return files[key][0];
     if (key && files[key] && !Array.isArray(files[key])) return files[key];
   }
+
+  // Normalized object keys
+  for (const name of normalizedNames) {
+    const key = Object.keys(files).find(k => {
+      const norm = k.toLowerCase().replace(/[-_]/g, '');
+      return norm === name || norm.includes(name) || name.includes(norm);
+    });
+    if (key && files[key]?.[0]) return files[key][0];
+    if (key && files[key] && !Array.isArray(files[key])) return files[key];
+  }
+
   return null;
 };
 

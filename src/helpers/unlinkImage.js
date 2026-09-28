@@ -12,9 +12,17 @@ function unlinkImage(imgPath) {
   }
 
   console.log("File Path ---> ", imgPath, imagePath);
-  const fileExists = fs.existsSync(imagePath);
-  if (!fileExists) {
-    console.log(`File ${imagePath} does not exist`);
+  try {
+    if (!fs.existsSync(imagePath)) {
+      console.log(`File ${imagePath} does not exist`);
+      return;
+    }
+    const stat = fs.statSync(imagePath);
+    if (!stat.isFile()) {
+      console.log(`Path ${imagePath} is a directory, skipping unlink`);
+      return;
+    }
+  } catch (err) {
     return;
   }
 

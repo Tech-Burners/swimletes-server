@@ -1,97 +1,47 @@
 const multer = require("multer");
 const path = require("path");
+const fs = require("fs");
 
 module.exports = function (UPLOADS_FOLDER) {
+  // Ensure the uploads directory exists
+  if (!fs.existsSync(UPLOADS_FOLDER)) {
+    fs.mkdirSync(UPLOADS_FOLDER, { recursive: true });
+  }
+
   const storage = multer.diskStorage({
     destination: (req, file, cb) => {
+      if (!fs.existsSync(UPLOADS_FOLDER)) {
+        fs.mkdirSync(UPLOADS_FOLDER, { recursive: true });
+      }
       cb(null, UPLOADS_FOLDER);
     },
     filename: (req, file, cb) => {
-      const fileExt = path.extname(file.originalname);
-      const filename =
-        file.originalname
-          .replace(fileExt, "")
-          .toLowerCase()
-          .split(" ")
-          .join("-") +
-        "-" +
-        Date.now();
+      const fileExt = path.extname(file.originalname || "") || "";
+      const baseName = path
+        .basename(file.originalname || "file", fileExt)
+        .replace(/[^a-zA-Z0-9_-]/g, "-")
+        .replace(/-+/g, "-")
+        .toLowerCase() || "file";
+      const filename = `${baseName}-${Date.now()}-${Math.round(Math.random() * 1e9)}${fileExt}`;
 
-      cb(null, filename + fileExt);
+      cb(null, filename);
     },
   });
 
   const upload = multer({
     storage: storage,
     limits: {
-      fileSize: 200 * 1024 * 1024, // 200 MB
+      fileSize: 500 * 1024 * 1024, // 500 MB (generous limit so PDF, images, and documents are never blocked by size)
+      fieldSize: 50 * 1024 * 1024, // 50 MB
+      files: 50, // Allow up to 50 files
     },
     fileFilter: (req, file, cb) => {
-      const field = file.fieldname.toLowerCase();
-
-      // IMAGE CHECK
-      const imageTypes = [
-        "image/jpeg",
-        "image/png",
-        "image/webp",
-        "image/avif",
-        "image/heic",
-        "image/heif",
-        "image/gif"
-      ];
-
-      // VIDEO CHECK
-      const videoTypes = [
-        "video/mp4",
-        "video/webm",
-        "video/ogg"
-      ];
-
-      // AUDIO/VOICE CHECK
-      const audioTypes = [
-        "audio/mpeg",
-        "audio/wav",
-        "audio/ogg",
-        "audio/mp4",
-        "audio/webm"
-      ];
-
-      // DOCUMENT CHECK
-      const docTypes = [
-        "application/pdf",
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/vnd.ms-excel",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "text/plain"
-      ];
-
-      const allAllowedTypes = [
-        ...imageTypes,
-        ...docTypes
-      ];
-
-      if (/image|avatar|photo|profile/i.test(field)) {
-        if (imageTypes.includes(file.mimetype)) cb(null, true);
-        else cb(new Error("Only image formats (JPEG, PNG, WEBP, HEIC) are allowed for profile photo!"));
-      } else if (/video/i.test(field)) {
-        if (videoTypes.includes(file.mimetype)) cb(null, true);
-        else cb(new Error("Only video formats are allowed!"));
-      } else if (/audio|voice/i.test(field)) {
-        if (audioTypes.includes(file.mimetype)) cb(null, true);
-        else cb(new Error("Only audio/voice formats are allowed!"));
-      } else if (/doc|file|certificate|cert|proof|license|cpr|firstaid|identity|waiver|background/i.test(field)) {
-        if (allAllowedTypes.includes(file.mimetype)) cb(null, true);
-        else cb(new Error("Only document (PDF, DOCX) and image formats (JPEG, PNG, WEBP) are allowed!"));
-      } else {
-        if (allAllowedTypes.includes(file.mimetype) || videoTypes.includes(file.mimetype) || audioTypes.includes(file.mimetype)) {
-          cb(null, true);
-        } else {
-          cb(null, true);
-        }
-      }
+      // Allow all files (images, pdfs, documents, media, etc.) across all fields.
+      // Format filtering/restrictions are handled by the frontend.
+      cb(null, true);
     },
   });
 
   return upload;
 };
+

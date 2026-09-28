@@ -389,13 +389,50 @@ const changePassword = catchAsync(async (req, res) => {
   );
 });
 
-// Update Profile (Step 4: Full Name, DOB, Avatar, About, etc.)
+// Update Profile (Step 4 & Figma Edit Profile 40012257:5335: Full Name, DOB, Avatar, Email, etc.)
 const updateProfile = catchAsync(async (req, res) => {
-  const isExistingUser = req.dbUser || (req.User?._id && await getUserById(req.User._id));
+  // Normalize field aliases
+  if (req.body.name && !req.body.fullName) {
+    req.body.fullName = req.body.name;
+  }
+  if (!req.body.dob && (req.body.dateOfBirth || req.body.birthDate)) {
+    req.body.dob = req.body.dateOfBirth || req.body.birthDate;
+  }
 
-  // Case A: Existing user in MongoDB updating their profile
+  // Extract file from req.file or req.files (supports any field name: image, photo, avatar, file, etc.)
+  const uploadedFile =
+    req.file ||
+    (Array.isArray(req.files) &&
+      (req.files.find((f) => /image|photo|avatar|profile|picture|file|doc/i.test(f.fieldname)) || req.files[0])) ||
+    null;
+
+  if (!req.file && uploadedFile) {
+    req.file = uploadedFile;
+  }
+
+  // If no file uploaded, check if photo or avatar was sent in body
+  if (!req.file && (req.body.photo || req.body.avatar || req.body.profileImage)) {
+    req.body.image = req.body.photo || req.body.avatar || req.body.profileImage;
+  }
+
+  const isExistingUser = req.dbUser || (req.User?._id && (await getUserById(req.User._id)));
+
+  // Case A: Existing user in MongoDB updating their profile (Figma 40012257:5335)
   if (isExistingUser) {
     const user = isExistingUser;
+
+    // Email change verification check
+    if (req.body.email && typeof req.body.email === 'string') {
+      const newEmail = req.body.email.toLowerCase().trim();
+      if (newEmail !== user.email?.toLowerCase().trim()) {
+        const existingUser = await getUserByEmail(newEmail);
+        if (existingUser && existingUser._id.toString() !== user._id.toString()) {
+          throw new ApiError(status.CONFLICT, "This email is already in use by another account");
+        }
+        req.body.email = newEmail;
+      }
+    }
+
     if (req.file) {
       const { filename } = req.file;
       if (filename && filename.length > 0) {
@@ -411,13 +448,19 @@ const updateProfile = catchAsync(async (req, res) => {
 
     const result = await updateUserById(user._id, req.body);
 
+    const userObj = result.toObject ? result.toObject() : { ...result };
+    const imagePath = userObj.image || 'user.jpg';
+    userObj.imageUrl = imagePath.startsWith('http') || imagePath.startsWith('/')
+      ? imagePath
+      : `/uploads/users/${imagePath}`;
+
     return res.status(status.OK).json(
       response({
         status: 'OK',
         statusCode: status.OK,
         type: result.role,
         message: 'Profile updated successfully',
-        data: result
+        data: userObj
       })
     );
   }
@@ -434,13 +477,19 @@ const updateProfile = catchAsync(async (req, res) => {
     const createdUser = await createUserOnProfileSetupService(req.User, req.body, req.file);
     const accessToken = await tokenGenerator(createdUser);
 
+    const userObj = createdUser.toObject ? createdUser.toObject() : { ...createdUser };
+    const imagePath = userObj.image || 'user.jpg';
+    userObj.imageUrl = imagePath.startsWith('http') || imagePath.startsWith('/')
+      ? imagePath
+      : `/uploads/users/${imagePath}`;
+
     return res.status(status.CREATED).json(
       response({
         status: 'OK',
         statusCode: status.CREATED,
         type: 'user',
         message: 'Profile setup completed and user account created successfully',
-        data: createdUser,
+        data: userObj,
         accessToken
       })
     );
@@ -559,7 +608,7 @@ const myDocumentsController = catchAsync(async (req, res) => {
   );
 });
 
-// Get My Profile
+// Get My Profile (Powers Figma Edit Profile 40012257:5335)
 const userDetailsByID = catchAsync(async (req, res) => {
   const user = await profileByIdService(req.User._id);
 
@@ -567,12 +616,18 @@ const userDetailsByID = catchAsync(async (req, res) => {
     throw new ApiError(status.NOT_FOUND, "User not found");
   }
 
+  const userObj = user.toObject ? user.toObject() : { ...user };
+  const imagePath = userObj.image || 'user.jpg';
+  userObj.imageUrl = imagePath.startsWith('http') || imagePath.startsWith('/')
+    ? imagePath
+    : `/uploads/users/${imagePath}`;
+
   return res.status(status.OK).json(
     response({
       statusCode: status.OK,
       message: "User details retrieved successfully",
-      type: "user",
-      data: user,
+      type: user.role || "user",
+      data: userObj,
       status: "OK"
     })
   );

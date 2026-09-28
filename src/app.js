@@ -2,6 +2,7 @@ const dns = require("dns");
 dns.setServers(["8.8.8.8", "8.8.4.4"]);
 
 const express = require("express");
+const path = require("path");
 const cors = require("cors");
 const helmet = require("helmet");
 const routes = require("./routes");
@@ -22,8 +23,8 @@ const app = express();
 
 
 // Body Parsers
-app.use(express.json()); // JSON
-app.use(bodyParser.urlencoded({ extended: true })); // form submissions
+app.use(express.json({ limit: "100mb" })); // JSON
+app.use(bodyParser.urlencoded({ extended: true, limit: "100mb" })); // form submissions
 
 // const flutterwaveWebhook = require("./helpers/flutterWaveWebhook");
 // app.post("/api/v1/webhook/flutterwave", flutterwaveWebhook);
@@ -78,6 +79,9 @@ app.use((req, res, next) => {
 });
 
 // Static Files
+app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
+app.use('/public', express.static(path.join(__dirname, '../public')));
+app.use(express.static(path.join(__dirname, '../public')));
 app.use(express.static("public"));
 
 // Serve assetlinks.json
@@ -98,7 +102,6 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
 app.use("/api/v1", routes);
 
 // Instructor UI Pages (Figma 40012288:1871, 40012321:3120, 40012392:3369)
-const path = require("path");
 app.get("/instructor", (req, res) => {
   res.sendFile(path.join(__dirname, "../public/instructor/index.html"));
 });

@@ -167,19 +167,33 @@ const deleteChat = catchAsync(async (req, res) => {
 
 // 8. Upload Attachment for Chat (Simple and consistent format for all files)
 const uploadAttachment = catchAsync(async (req, res) => {
-  const rawFiles = req.files && Array.isArray(req.files)
-    ? req.files
-    : req.file
-    ? [req.file]
-    : [];
+  let rawFiles = [];
+  if (Array.isArray(req.files)) {
+    rawFiles = req.files;
+  } else if (req.files && typeof req.files === 'object') {
+    Object.values(req.files).forEach((val) => {
+      if (Array.isArray(val)) rawFiles.push(...val);
+      else if (val) rawFiles.push(val);
+    });
+  } else if (req.file) {
+    rawFiles = [req.file];
+  }
 
   const files = rawFiles.map((file) => `/uploads/chat/${file.filename}`);
+  const fileDetails = rawFiles.map((file) => ({
+    url: `/uploads/chat/${file.filename}`,
+    name: file.originalname,
+    filename: file.filename,
+    size: file.size,
+    mimetype: file.mimetype
+  }));
 
   return res.status(status.OK).json({
     status: 'OK',
     statusCode: status.OK,
     message: 'Files uploaded successfully',
-    data: files
+    data: files,
+    fileDetails
   });
 });
 

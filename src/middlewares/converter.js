@@ -19,53 +19,59 @@ const convertHeicFileToPng = async (file, UPLOADS_FOLDER) => {
     await fs.writeFile(pngFilePath, pngBuffer);
 
     // Remove the original HEIC file
-    await fs.unlink(file.path);
+    await fs.unlink(file.path).catch(() => {});
 
     // Update file properties
     file.filename = pngFileName;
     file.path = pngFilePath;
+    file.mimetype = 'image/png';
   } catch (error) {
-    throw new Error('Internal server error');
+    // If conversion fails, keep the original file without crashing the upload
+    console.warn(`HEIC conversion skipped for ${file.originalname || file.filename}:`, error.message);
   }
 };
 
 // Middleware to convert HEIC files to PNG
 const convertHeicToPng = (UPLOADS_FOLDER) => {
   return async (req, res, next) => {
-    // Convert single HEIC file if req.file is present
-    if (req.file && (req.file.mimetype === 'image/heic' || req.file.mimetype === 'image/heif')) {
-      try {
-        await convertHeicFileToPng(req.file, UPLOADS_FOLDER);
-      } catch (error) {
-        return res.status(500).json({ error: error.message });
-      }
-    }
+    try {
+      const isHeic = (file) =>
+        file &&
+        (file.mimetype === 'image/heic' ||
+          file.mimetype === 'image/heif' ||
+          /\.heic$/i.test(file.originalname || '') ||
+          /\.heif$/i.test(file.originalname || ''));
 
-    // Convert each HEIC file in req.files if present
-    if (req.files) {
-      try {
+      // Convert single HEIC file if req.file is present
+      if (req.file && isHeic(req.file)) {
+        await convertHeicFileToPng(req.file, UPLOADS_FOLDER);
+      }
+
+      // Convert each HEIC file in req.files if present
+      if (req.files) {
         if (Array.isArray(req.files)) {
           for (const file of req.files) {
-            if (file.mimetype === 'image/heic' || file.mimetype === 'image/heif') {
+            if (isHeic(file)) {
               await convertHeicFileToPng(file, UPLOADS_FOLDER);
             }
           }
         } else {
           for (const field in req.files) {
-            if (Array.isArray(req.files[field])) {
-              for (const file of req.files[field]) {
-                if (file.mimetype === 'image/heic' || file.mimetype === 'image/heif') {
+            const fieldVal = req.files[field];
+            if (Array.isArray(fieldVal)) {
+              for (const file of fieldVal) {
+                if (isHeic(file)) {
                   await convertHeicFileToPng(file, UPLOADS_FOLDER);
                 }
               }
-            } else if (req.files[field] && (req.files[field].mimetype === 'image/heic' || req.files[field].mimetype === 'image/heif')) {
-              await convertHeicFileToPng(req.files[field], UPLOADS_FOLDER);
+            } else if (isHeic(fieldVal)) {
+              await convertHeicFileToPng(fieldVal, UPLOADS_FOLDER);
             }
           }
         }
-      } catch (error) {
-        return res.status(500).json({ error: error.message });
       }
+    } catch (err) {
+      console.warn('HEIC converter middleware warning:', err.message);
     }
 
     next();

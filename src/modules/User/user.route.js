@@ -39,7 +39,37 @@ const {
   getAdminInstructorReviewsController,
   updateInstructorStatusController
 } = require("./user.controller");
+const { updateProfile, userDetailsByID } = require('../Auth/auth.controller');
+const { authOrOnboarding, auth: authUser } = require('../../middlewares/auth');
+
 ensureUploadFolderExists(UPLOADS_FOLDER_USERS);
+
+// User Profile Get & Update (supports /user/profile, /user/update-profile, /user/edit-profile)
+router.get(['/my-profile', '/profile'], authUser(['user', 'instructor', 'admin']), userDetailsByID);
+router.put(
+  ['/update-profile', '/edit-profile', '/profile'],
+  authOrOnboarding(['user', 'instructor', 'admin']),
+  uploadUsers.any(),
+  convertHeicToPng(UPLOADS_FOLDER_USERS),
+  parseData(),
+  updateProfile
+);
+router.patch(
+  ['/update-profile', '/edit-profile', '/profile'],
+  authOrOnboarding(['user', 'instructor', 'admin']),
+  uploadUsers.any(),
+  convertHeicToPng(UPLOADS_FOLDER_USERS),
+  parseData(),
+  updateProfile
+);
+router.post(
+  ['/update-profile', '/edit-profile'],
+  authOrOnboarding(['user', 'instructor', 'admin']),
+  uploadUsers.any(),
+  convertHeicToPng(UPLOADS_FOLDER_USERS),
+  parseData(),
+  updateProfile
+);
 
 // User Home / Dashboard (Top Rated Instructors Near You - Figma 40010003:11)
 router.get("/home", tokenCheck, getUserHomeController);
