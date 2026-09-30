@@ -6,6 +6,7 @@ const {
   getMyBookingsService,
   getBookingTabCountsService,
   getBookingByIdService,
+  getBookingChatService,
   acceptBookingService,
   declineBookingService,
   markBookingActiveService,
@@ -86,6 +87,20 @@ const getBookingDetails = catchAsync(async (req, res) => {
   );
 });
 
+// Get chat conversation / ID for booking
+const getBookingChat = catchAsync(async (req, res) => {
+  const userId = req.User ? req.User._id : null;
+  const result = await getBookingChatService(req.params.id, userId);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      message: 'Booking chat fetched successfully',
+      data: result
+    })
+  );
+});
+
 // Instructor Accepts booking request
 const acceptBooking = catchAsync(async (req, res) => {
   const result = await acceptBookingService(req.params.id, req.User._id);
@@ -126,14 +141,14 @@ const startBooking = catchAsync(async (req, res) => {
   );
 });
 
-// Instructor Marks booking complete
+// Mark booking complete (User / Instructor / Admin - two-sided confirmation)
 const completeBooking = catchAsync(async (req, res) => {
-  const result = await completeBookingService(req.params.id, req.User._id);
+  const result = await completeBookingService(req.params.id, req.User._id, req.User.role);
   return res.status(status.OK).json(
     response({
       status: 'OK',
       statusCode: status.OK,
-      message: 'Booking marked as complete',
+      message: result.message || 'Booking marked as complete',
       data: result
     })
   );
@@ -390,6 +405,7 @@ module.exports = {
   getMyBookings,
   getBookingTabCounts,
   getBookingDetails,
+  getBookingChat,
   getBookingReviewDetails,
   getBookingConfirmationDetails,
   checkBookingConflictController,

@@ -340,6 +340,27 @@ const bookingSchema = new mongoose.Schema(
     completedAt: {
       type: Date
     },
+    clientCompleted: {
+      type: Boolean,
+      default: false
+    },
+    instructorCompleted: {
+      type: Boolean,
+      default: false
+    },
+    clientCompletedAt: {
+      type: Date
+    },
+    instructorCompletedAt: {
+      type: Date
+    },
+    autoConfirmAt: {
+      type: Date
+    },
+    autoConfirmed: {
+      type: Boolean,
+      default: false
+    },
     isReviewed: {
       type: Boolean,
       default: false
@@ -380,9 +401,9 @@ const bookingSchema = new mongoose.Schema(
   }
 );
 
-// Method to check if messaging is allowed (only for 'accepted' or 'active' bookings)
+// Method to check if messaging is allowed (for 'accepted', 'active', or 'completed' bookings)
 bookingSchema.methods.canChat = function () {
-  return ['accepted', 'active'].includes(this.status);
+  return ['accepted', 'active', 'completed'].includes(this.status);
 };
 
 // Auto-generate human-readable Booking Reference ID (e.g. SW-782941)

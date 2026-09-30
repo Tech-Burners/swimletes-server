@@ -3,6 +3,7 @@ require("dotenv").config();
 const mongoose = require("mongoose");
 const logger = require("./helpers/logger");
 const { seedAdmin } = require("./seeder/seed");
+const { initCronJobs } = require("./helpers/cronJobs");
 // Socket.io setup
 const { createServer } = require("http");
 const {socketIO} = require("./socket/socketIO.js");
@@ -33,6 +34,7 @@ async function myServer() {
   try {
     await mongoose.connect(process.env.MONGODB_CONNECTION);
     await seedAdmin();
+    initCronJobs();
     server = app.listen(port, () => {
       console.dir(
         `---> ${appName} server is running at: http://${serverIP}:${port}`

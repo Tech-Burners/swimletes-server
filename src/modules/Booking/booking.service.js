@@ -4,6 +4,7 @@ const User = require('../User/user.model');
 const ApiError = require('../../helpers/ApiError');
 const { status: httpStatus } = require('http-status');
 const stripeHelper = require('../../helpers/stripe');
+const { emailWithNodemailer } = require('../../helpers/email');
 const {
   timeStringToMinutes,
   minutesToTimeString,
@@ -16,7 +17,15 @@ const {
  */
 const parseBookingDate = (dateInput) => {
   if (!dateInput) return null;
-  if (dateInput instanceof Date) return isNaN(dateInput.getTime()) ? null : dateInput;
+  if (dateInput instanceof Date) {
+    if (isNaN(dateInput.getTime())) return null;
+    const iso = dateInput.toISOString();
+    const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      return new Date(parseInt(match[1], 10), parseInt(match[2], 10) - 1, parseInt(match[3], 10));
+    }
+    return dateInput;
+  }
 
   if (typeof dateInput === 'string') {
     const match = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -27,6 +36,185 @@ const parseBookingDate = (dateInput) => {
 
   const d = new Date(dateInput);
   return isNaN(d.getTime()) ? null : d;
+};
+
+/**
+ * Safely resolve booking start and end Date objects from date + startTime / endTime / duration
+ */
+const getBookingDateTimes = (booking) => {
+  if (!booking) return { startDateTime: null, endDateTime: null };
+  const bDate = booking.date;
+  const startTime = booking.startTime;
+  const endTime = booking.endTime;
+  const duration = Number(booking.duration) || 60;
+
+  if (!bDate || !startTime) {
+    return { startDateTime: null, endDateTime: null };
+  }
+
+  const d = parseBookingDate(bDate);
+  if (!d || isNaN(d.getTime())) {
+    return { startDateTime: null, endDateTime: null };
+  }
+
+  const startMin = timeStringToMinutes(startTime);
+  if (startMin === null) {
+    return { startDateTime: null, endDateTime: null };
+  }
+
+  const startDateTime = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  startDateTime.setMinutes(startMin);
+
+  let endMin = timeStringToMinutes(endTime);
+  if (endMin === null || endMin <= startMin) {
+    endMin = startMin + duration;
+  }
+
+  const endDateTime = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  endDateTime.setMinutes(endMin);
+
+  return { startDateTime, endDateTime };
+};
+
+/**
+ * Checks if the scheduled booking start time has arrived for an accepted or active booking
+ */
+const isBookingTimeStarted = (booking) => {
+  if (!booking) return false;
+  if (booking.status === 'active') return true;
+  if (booking.status !== 'accepted') return false;
+
+  const { startDateTime } = getBookingDateTimes(booking);
+  if (!startDateTime) return false;
+  return Date.now() >= startDateTime.getTime();
+};
+
+/**
+ * Checks if a booking is currently running / in-progress
+ * "active- booking is running (if the booking time is start show in progress flag)"
+ */
+const getIsInProgress = (booking) => {
+  if (!booking) return false;
+  const status = booking.status;
+  if (['completed', 'cancelled', 'declined', 'pending_payment'].includes(status)) {
+    return false;
+  }
+  if (status === 'active') {
+    return true;
+  }
+  if (status === 'accepted') {
+    return isBookingTimeStarted(booking);
+  }
+  return false;
+};
+
+/**
+ * Auto-sync accepted bookings whose start time has arrived to 'active' status in database
+ */
+const syncUserBookingsActiveStatus = async (userQuery) => {
+  try {
+    const acceptedBookings = await Booking.find({
+      ...userQuery,
+      status: 'accepted'
+    });
+
+    const now = Date.now();
+    const toActivateIds = [];
+
+    for (const b of acceptedBookings) {
+      const { startDateTime } = getBookingDateTimes(b);
+      if (startDateTime && now >= startDateTime.getTime()) {
+        toActivateIds.push(b._id);
+      }
+    }
+
+    if (toActivateIds.length > 0) {
+      await Booking.updateMany(
+        { _id: { $in: toActivateIds } },
+        { $set: { status: 'active' } }
+      );
+    }
+
+    // Also auto-confirm any bookings whose 72h confirmation window has passed
+    await syncAutoConfirmedBookings();
+  } catch (err) {
+    console.error('Error auto-syncing active bookings status:', err);
+  }
+};
+
+/**
+ * Auto-confirms lessons after 72 hours (3 days) if the instructor completed
+ * and the client didn't respond / confirm.
+ */
+const syncAutoConfirmedBookings = async () => {
+  try {
+    const now = new Date();
+    const seventyTwoHoursAgo = new Date(now.getTime() - 72 * 60 * 60 * 1000);
+
+    const overdueBookings = await Booking.find({
+      status: { $ne: 'completed' },
+      instructorCompleted: true,
+      clientCompleted: { $ne: true },
+      $or: [
+        { autoConfirmAt: { $lte: now } },
+        { instructorCompletedAt: { $lte: seventyTwoHoursAgo } }
+      ]
+    });
+
+    if (overdueBookings.length > 0) {
+      for (const b of overdueBookings) {
+        b.clientCompleted = true;
+        b.clientCompletedAt = now;
+        b.status = 'completed';
+        b.completedAt = now;
+        b.autoConfirmed = true;
+        await b.save();
+
+        if (b.instructor) {
+          await User.findByIdAndUpdate(b.instructor, { $inc: { lessonsTaught: 1 } });
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error auto-confirming 72h overdue bookings:', err);
+  }
+};
+
+/**
+ * System-wide auto-sync for accepted bookings whose start time has arrived
+ */
+const syncAllAcceptedBookings = async () => {
+  try {
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const acceptedBookings = await Booking.find({
+      status: 'accepted',
+      date: { $lte: todayEnd }
+    });
+
+    const now = Date.now();
+    const toActivateIds = [];
+
+    for (const b of acceptedBookings) {
+      const { startDateTime } = getBookingDateTimes(b);
+      if (startDateTime && now >= startDateTime.getTime()) {
+        toActivateIds.push(b._id);
+      }
+    }
+
+    if (toActivateIds.length > 0) {
+      await Booking.updateMany(
+        { _id: { $in: toActivateIds } },
+        { $set: { status: 'active' } }
+      );
+    }
+
+    // Also auto-confirm any bookings whose 72h confirmation window has passed
+    await syncAutoConfirmedBookings();
+  } catch (err) {
+    console.error('Error auto-syncing all active bookings status:', err);
+  }
 };
 
 /**
@@ -350,22 +538,42 @@ const formatBookingConfirmedResponse = (booking, session = null) => {
 
 /**
  * Format User Booking Card (Strictly only the fields shown on User Figma screens)
+ * No unnecessary internal fields or nulls.
  */
 const formatUserBookingCard = (booking) => {
   const b = booking.toObject ? booking.toObject() : booking;
   const bookingDate = parseBookingDate(b.date);
   const now = new Date();
+  const inProgress = getIsInProgress(b);
+  const clientCompleted = b.status === 'completed' || Boolean(b.clientCompleted);
+  const instructorCompleted = b.status === 'completed' || Boolean(b.instructorCompleted);
+  const bothCompleted = b.status === 'completed' || (clientCompleted && instructorCompleted);
 
   const daysShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+  const swimmerName = b.swimmer?.name || 'Swimmer';
+  const instructorFullName = b.instructor?.fullName || 'Instructor';
+  const instructorFirstName = instructorFullName.trim().split(' ')[0] || 'Instructor';
+  const instructorImage = b.instructor?.image || '/uploads/users/user.jpg';
+  const instructorId = b.instructor?._id || b.instructor;
+
+  const duration = Number(b.duration) || 60;
+  const poolName = b.location?.poolName || b.location?.address || '';
+  const lessonTitle = `Private lesson for ${swimmerName}`;
+
+  const chatId = b.chatId ? b.chatId.toString() : (b.chat?._id ? b.chat._id.toString() : (b.chat ? b.chat.toString() : ''));
+
+  let dayName = 'Wed';
+  let monthName = 'Aug';
+  let dateNum = 5;
   let formattedDate = '';
   let relativeTime = '';
 
   if (bookingDate && !isNaN(bookingDate.getTime())) {
-    const dayName = daysShort[bookingDate.getDay()];
-    const monthName = monthsShort[bookingDate.getMonth()];
-    const dateNum = bookingDate.getDate();
+    dayName = daysShort[bookingDate.getDay()];
+    monthName = monthsShort[bookingDate.getMonth()];
+    dateNum = bookingDate.getDate();
 
     formattedDate = `${dayName}, ${monthName} ${dateNum} · ${b.startTime || ''}`;
 
@@ -374,134 +582,398 @@ const formatUserBookingCard = (booking) => {
     const diffTime = dBooking.getTime() - dToday.getTime();
     const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
-    if (b.status === 'completed') {
-      relativeTime = `${dayName}, ${monthName} ${dateNum} · ${b.duration || 60} min`;
-    } else if (diffDays > 1) {
-      relativeTime = `In ${diffDays} days · ${b.duration || 60} min`;
+    if (diffDays > 1) {
+      relativeTime = `In ${diffDays} days · ${duration} min`;
     } else if (diffDays === 1) {
-      relativeTime = `In 1 day · ${b.duration || 60} min`;
+      relativeTime = `In 1 day · ${duration} min`;
     } else if (diffDays === 0) {
-      relativeTime = `Today · ${b.duration || 60} min`;
+      relativeTime = `Today · ${duration} min`;
     } else if (diffDays === -1) {
-      relativeTime = `1 day ago · ${b.duration || 60} min`;
+      relativeTime = `1 day ago · ${duration} min`;
     } else {
-      relativeTime = `${Math.abs(diffDays)} days ago · ${b.duration || 60} min`;
+      relativeTime = `${Math.abs(diffDays)} days ago · ${duration} min`;
     }
   }
 
-  const swimmerName = b.swimmer?.name || 'Swimmer';
-  const clientReview = b.clientReview || null;
+  // Determine user card state strictly matching Figma tabs
+  let cardState = 'upcoming';
+  if (['cancelled', 'declined'].includes(b.status)) {
+    cardState = 'cancelled';
+  } else if (b.status === 'completed' || bothCompleted) {
+    cardState = 'completed';
+  } else if (instructorCompleted && !clientCompleted) {
+    cardState = 'to_confirm';
+  } else if (b.status === 'active' || inProgress) {
+    cardState = 'active';
+  } else if (['pending', 'pending_payment'].includes(b.status)) {
+    cardState = 'requested';
+  } else {
+    cardState = 'upcoming';
+  }
+
+  const instructorObj = {
+    _id: instructorId,
+    fullName: instructorFullName,
+    image: instructorImage
+  };
+
+  // 1. Upcoming Card (Figma 40012200-4073)
+  if (cardState === 'upcoming') {
+    return {
+      _id: b._id,
+      bookingId: b.bookingId || '',
+      chatId,
+      status: 'upcoming',
+      formattedDate,
+      relativeTime,
+      instructor: instructorObj,
+      lessonTitle,
+      poolName,
+      action: `Message ${instructorFirstName}`
+    };
+  }
+
+  // 2. Active Card (Figma 40012392-6688)
+  if (cardState === 'active') {
+    return {
+      _id: b._id,
+      bookingId: b.bookingId || '',
+      chatId,
+      status: 'active',
+      formattedDate,
+      relativeTime: inProgress ? `In Progress · ${duration} min` : (relativeTime || `In Progress · ${duration} min`),
+      instructor: instructorObj,
+      lessonTitle,
+      poolName,
+      action: `Message ${instructorFirstName}`
+    };
+  }
+
+  // 3. To Confirm Card (Figma 40012521-7298)
+  if (cardState === 'to_confirm') {
+    return {
+      _id: b._id,
+      bookingId: b.bookingId || '',
+      chatId,
+      status: 'to_confirm',
+      formattedDate,
+      relativeTime: `Completed · ${duration} min`,
+      instructor: instructorObj,
+      lessonTitle,
+      poolName,
+      action: 'It happened'
+    };
+  }
+
+  // 4. Completed Card (Figma 40012228-3788)
+  if (cardState === 'completed') {
+    const completedCard = {
+      _id: b._id,
+      bookingId: b.bookingId || '',
+      chatId,
+      status: 'completed',
+      instructor: instructorObj,
+      lessonTitle,
+      formattedDate: `${dayName}, ${monthName} ${dateNum} · ${duration} min`,
+      price: Number(b.pricing?.totalAmount || 0),
+      action: 'Book Again'
+    };
+
+    const clientReview = b.clientReview || null;
+    if (clientReview && clientReview.rating) {
+      completedCard.rating = Number(clientReview.rating);
+      completedCard.ratingText = `You rated ${Number(clientReview.rating).toFixed(1)}`;
+    }
+
+    return completedCard;
+  }
+
+  // 5. Requested Card (Figma 40012521-7633)
+  if (cardState === 'requested') {
+    const requestedCard = {
+      _id: b._id,
+      bookingId: b.bookingId || '',
+      chatId,
+      status: b.status === 'pending_payment' ? 'unpaid' : 'requested',
+      formattedDate,
+      relativeTime,
+      instructor: instructorObj,
+      lessonTitle,
+      poolName
+    };
+    if (b.status === 'pending_payment') {
+      requestedCard.action = 'Pay Now';
+      if (b.payment?.checkoutUrl) {
+        requestedCard.paymentUrl = b.payment.checkoutUrl;
+      }
+    }
+    return requestedCard;
+  }
+
+  // 6. Cancelled Card (Figma 40012257-2729 & 40012521-8097)
+  const totalAmt = Number(b.pricing?.totalAmount || 0);
+  const refundAmt = Number(b.refundAmount || totalAmt);
+  let refundStatus = '$0.00 refunded';
+  if (b.payment?.status === 'refunded' || refundAmt > 0) {
+    refundStatus = `$${refundAmt.toFixed(2)} refunded`;
+  } else if (b.payment?.status === 'paid') {
+    refundStatus = `$${totalAmt.toFixed(2)} refund pending`;
+  }
+
+  const cancelDateObj = b.cancelledAt ? new Date(b.cancelledAt) : (b.updatedAt ? new Date(b.updatedAt) : null);
+  let cancelDateStr = '';
+  if (cancelDateObj && !isNaN(cancelDateObj.getTime())) {
+    cancelDateStr = ` on ${monthsShort[cancelDateObj.getMonth()]} ${cancelDateObj.getDate()}`;
+  }
+
+  let cancellationNote = '';
+  if (b.cancelledBy === 'client') {
+    cancellationNote = `Cancelled by you${cancelDateStr}${b.cancellationReason ? ` · ${b.cancellationReason}` : ''}`;
+  } else if (b.cancelledBy === 'instructor') {
+    cancellationNote = `Cancelled by ${instructorFirstName}${cancelDateStr}${b.cancellationReason ? ` · ${b.cancellationReason}` : ''}`;
+  } else if (b.status === 'declined') {
+    cancellationNote = `Declined by ${instructorFirstName}${b.declinedReason ? ` · ${b.declinedReason}` : ''}`;
+  } else {
+    cancellationNote = `Cancelled${cancelDateStr}${b.cancellationReason ? ` · ${b.cancellationReason}` : ''}`;
+  }
 
   return {
     _id: b._id,
     bookingId: b.bookingId || '',
-    status: b.status,
-    formattedDate,
-    relativeTime,
-    lessonTitle: `Private lesson for ${swimmerName}`,
-    poolName: b.location?.poolName || b.location?.address || '',
-    price: Number(b.pricing?.totalAmount || 0),
-    paymentStatus: b.payment?.status || 'unpaid',
-    checkoutUrl: b.payment?.checkoutUrl || null,
-    paymentUrl: b.payment?.checkoutUrl || null,
-    rating: clientReview?.rating || null,
-    ratingText: clientReview?.rating ? `You rated ${Number(clientReview.rating).toFixed(1)}` : null,
-    instructor: {
-      _id: b.instructor?._id,
-      fullName: b.instructor?.fullName || 'Instructor',
-      image: b.instructor?.image || '/uploads/users/user.jpg'
-    }
+    chatId,
+    status: 'cancelled',
+    instructor: instructorObj,
+    lessonTitle,
+    formattedDate: `${dayName}, ${monthName} ${dateNum} · ${duration} min`,
+    refundStatus,
+    cancellationNote
   };
 };
 
 /**
  * Format Instructor Booking Card (Strictly only the fields shown on Instructor Figma screens)
+ * No unnecessary internal fields or nulls.
  */
 const formatInstructorBookingCard = (booking) => {
   const b = booking.toObject ? booking.toObject() : booking;
   const bookingDate = parseBookingDate(b.date);
   const now = new Date();
+  const inProgress = getIsInProgress(b);
+  const clientCompleted = b.status === 'completed' || Boolean(b.clientCompleted);
+  const instructorCompleted = b.status === 'completed' || Boolean(b.instructorCompleted);
+  const bothCompleted = b.status === 'completed' || (clientCompleted && instructorCompleted);
 
   const daysShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-  let formattedDate = '';
-  let relativeTime = '';
+  const clientFullName = b.client?.fullName || 'Client';
+  const clientFirstName = clientFullName.trim().split(' ')[0] || 'Client';
+  const clientImage = b.client?.image || '/uploads/users/user.jpg';
+  const clientId = b.client?._id || b.client;
+
+  const swimmerName = b.swimmer?.name || clientFullName;
+  const swimmerAge = b.swimmer?.age ? `swimmer age ${b.swimmer.age}` : '';
+  const lessonTitle = swimmerAge ? `Private lesson · ${swimmerAge}` : `Private lesson for ${swimmerName}`;
+
+  const duration = Number(b.duration) || 60;
+  const poolName = b.location?.poolName || b.location?.address || '';
+  const earnings = Number(b.pricing?.instructorEarnings || 0);
+
+  const chatId = b.chatId ? b.chatId.toString() : (b.chat?._id ? b.chat._id.toString() : (b.chat ? b.chat.toString() : ''));
+
   const timeRange = b.startTime && b.endTime ? `${b.startTime}–${b.endTime}` : (b.startTime || '');
 
-  if (bookingDate && !isNaN(bookingDate.getTime())) {
-    const dayName = daysShort[bookingDate.getDay()];
-    const monthName = monthsShort[bookingDate.getMonth()];
-    const dateNum = bookingDate.getDate();
+  let dayName = 'Wed';
+  let monthName = 'Aug';
+  let dateNum = 5;
+  let relativeTime = '';
 
-    if (b.status === 'pending') {
-      // Requests tab: "Wed, Aug 5 · 3:00–4:00 PM"
-      formattedDate = `${dayName}, ${monthName} ${dateNum} · ${timeRange}`;
-    } else if (b.status === 'active') {
-      // Active tab: "3:00 – 4:00 PM"
-      formattedDate = `${b.startTime || ''} – ${b.endTime || ''}`;
-    } else {
-      // Upcoming & Completed tab: "Wed, Aug 12 · 3:00 PM" or "Fri, Aug 1 · 3:00 PM"
-      formattedDate = `${dayName}, ${monthName} ${dateNum} · ${b.startTime || ''}`;
-    }
+  if (bookingDate && !isNaN(bookingDate.getTime())) {
+    dayName = daysShort[bookingDate.getDay()];
+    monthName = monthsShort[bookingDate.getMonth()];
+    dateNum = bookingDate.getDate();
 
     const dBooking = new Date(bookingDate.getFullYear(), bookingDate.getMonth(), bookingDate.getDate());
     const dToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const diffTime = dBooking.getTime() - dToday.getTime();
     const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
-    if (b.status === 'completed') {
-      relativeTime = `Completed · ${b.duration || 60} min`;
-    } else if (diffDays > 1) {
-      relativeTime = `In ${diffDays} days · ${b.duration || 60} min`;
+    if (diffDays > 1) {
+      relativeTime = `In ${diffDays} days · ${duration} min`;
     } else if (diffDays === 1) {
-      relativeTime = `In 1 day · ${b.duration || 60} min`;
+      relativeTime = `In 1 day · ${duration} min`;
     } else if (diffDays === 0) {
-      relativeTime = `Today · ${b.duration || 60} min`;
+      relativeTime = `Today · ${duration} min`;
     } else if (diffDays === -1) {
-      relativeTime = `1 day ago · ${b.duration || 60} min`;
+      relativeTime = `1 day ago · ${duration} min`;
     } else {
-      relativeTime = `${Math.abs(diffDays)} days ago · ${b.duration || 60} min`;
+      relativeTime = `${Math.abs(diffDays)} days ago · ${duration} min`;
     }
   }
 
-  // Request Expiration countdown (for pending requests)
-  let expiresIn = null;
-  if (b.status === 'pending' && b.expiresAt) {
-    const diffMs = new Date(b.expiresAt).getTime() - Date.now();
-    if (diffMs <= 0) {
-      expiresIn = 'Expired';
-    } else {
-      const hours = Math.floor(diffMs / (1000 * 60 * 60));
-      const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-      expiresIn = hours > 0 ? `Expires in ${hours}h ${minutes}m` : `Expires in ${minutes}m`;
-    }
+  // Determine instructor card state strictly matching Figma tabs
+  let cardState = 'requests';
+  if (['cancelled', 'declined'].includes(b.status)) {
+    cardState = 'cancelled';
+  } else if (b.status === 'completed' || bothCompleted) {
+    cardState = 'completed';
+  } else if (instructorCompleted && !clientCompleted) {
+    cardState = 'pending_approval';
+  } else if (b.status === 'active' || inProgress) {
+    cardState = 'active';
+  } else if (b.status === 'pending') {
+    cardState = 'requests';
+  } else {
+    cardState = 'upcoming';
   }
 
-  const swimmerName = b.swimmer?.name || b.client?.fullName || 'Swimmer';
-  const swimmerAge = b.swimmer?.age ? `swimmer age ${b.swimmer.age}` : '';
-  const lessonTitle = swimmerAge ? `Private lesson · ${swimmerAge}` : `Private lesson for ${swimmerName}`;
+  const clientObj = {
+    _id: clientId,
+    fullName: clientFullName,
+    image: clientImage
+  };
 
-  const clientReview = b.clientReview || null;
+  // 1. Requests Card (Figma 40012335-5594)
+  if (cardState === 'requests') {
+    let expiresIn = 'Expires soon';
+    if (b.expiresAt) {
+      const diffMs = new Date(b.expiresAt).getTime() - Date.now();
+      if (diffMs <= 0) {
+        expiresIn = 'Expired';
+      } else {
+        const hours = Math.floor(diffMs / (1000 * 60 * 60));
+        const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+        expiresIn = hours > 0 ? `Expires in ${hours}h ${minutes}m` : `Expires in ${minutes}m`;
+      }
+    }
 
-  return {
+    return {
+      _id: b._id,
+      bookingId: b.bookingId || '',
+      chatId,
+      status: 'pending',
+      client: clientObj,
+      lessonTitle,
+      earnings,
+      formattedDate: `${dayName}, ${monthName} ${dateNum} · ${timeRange}`,
+      poolName,
+      expiresIn,
+      actions: ['Decline', 'Accept']
+    };
+  }
+
+  // 2. Active Card (Figma 40012335-5965)
+  if (cardState === 'active') {
+    return {
+      _id: b._id,
+      bookingId: b.bookingId || '',
+      chatId,
+      status: 'active',
+      formattedDate: `${b.startTime || ''} – ${b.endTime || ''}`,
+      statusTag: 'In progress',
+      client: clientObj,
+      lessonTitle,
+      earnings,
+      poolName,
+      action: 'Mark as complete'
+    };
+  }
+
+  // 3. Upcoming Card (Figma 40012335-6142)
+  if (cardState === 'upcoming') {
+    return {
+      _id: b._id,
+      bookingId: b.bookingId || '',
+      chatId,
+      status: 'upcoming',
+      formattedDate: `${dayName}, ${monthName} ${dateNum} · ${b.startTime || ''}`,
+      relativeTime,
+      client: clientObj,
+      lessonTitle,
+      earnings,
+      poolName,
+      action: `Message ${clientFirstName}`
+    };
+  }
+
+  // 4. Pending Approval Card (Figma 40012335-6808)
+  if (cardState === 'pending_approval') {
+    return {
+      _id: b._id,
+      bookingId: b.bookingId || '',
+      chatId,
+      status: 'pending_approval',
+      formattedDate: `${dayName}, ${monthName} ${dateNum} · ${b.startTime || ''}`,
+      statusTag: `Completed · ${duration} min`,
+      client: clientObj,
+      lessonTitle,
+      earnings,
+      poolName,
+      alert: "You marked this complete. Payout releases automatically in 72 hours if they don't confirm.",
+      action: 'Send a reminder'
+    };
+  }
+
+  // 5. Completed Card (Figma 40012335-6303)
+  if (cardState === 'completed') {
+    const completedCard = {
+      _id: b._id,
+      bookingId: b.bookingId || '',
+      chatId,
+      status: 'completed',
+      formattedDate: `${dayName}, ${monthName} ${dateNum} · ${b.startTime || ''}`,
+      statusTag: `Completed · ${duration} min`,
+      client: clientObj,
+      lessonTitle,
+      earnings,
+      poolName,
+      action: `Message ${clientFirstName}`
+    };
+
+    const clientReview = b.clientReview || null;
+    if (clientReview && clientReview.rating) {
+      completedCard.rating = Number(clientReview.rating);
+      completedCard.ratingText = `They rated you ${Number(clientReview.rating).toFixed(1)}`;
+    }
+
+    return completedCard;
+  }
+
+  // 6. Cancelled Card (Figma 40012335-6544)
+  const cancelDateObj = b.cancelledAt ? new Date(b.cancelledAt) : (b.updatedAt ? new Date(b.updatedAt) : null);
+  let cancelDateStr = '';
+  if (cancelDateObj && !isNaN(cancelDateObj.getTime())) {
+    cancelDateStr = ` · ${monthsShort[cancelDateObj.getMonth()]} ${cancelDateObj.getDate()}`;
+  }
+
+  let cancellationNote = 'Cancelled';
+  if (b.cancelledBy === 'client') {
+    cancellationNote = `Cancelled by parent${cancelDateStr}`;
+  } else if (b.cancelledBy === 'instructor') {
+    cancellationNote = 'Cancelled by you';
+  } else if (b.status === 'declined') {
+    cancellationNote = 'Declined by you';
+  }
+
+  const cancelledCard = {
     _id: b._id,
     bookingId: b.bookingId || '',
-    status: b.status,
-    formattedDate,
-    relativeTime,
+    chatId,
+    status: 'cancelled',
+    formattedDate: `${dayName}, ${monthName} ${dateNum} · ${duration} min`,
+    cancellationNote,
+    client: clientObj,
     lessonTitle,
-    poolName: b.location?.poolName || b.location?.address || '',
-    earnings: Number(b.pricing?.instructorEarnings || 0),
-    expiresIn,
-    rating: clientReview?.rating || null,
-    ratingText: clientReview?.rating ? `They rated you ${Number(clientReview.rating).toFixed(1)}` : null,
-    client: {
-      _id: b.client?._id,
-      fullName: b.client?.fullName || 'Client',
-      image: b.client?.image || '/uploads/users/user.jpg'
-    }
+    earnings,
+    poolName
   };
+
+  if (b.cancelledBy === 'client' && (b.cancellationWindow === 'late' || Number(b.pricing?.instructorEarnings || 0) > 0)) {
+    cancelledCard.keptText = 'Late cancellation — you kept';
+    cancelledCard.keptAmount = Number(b.pricing?.instructorEarnings || 0);
+  }
+
+  return cancelledCard;
 };
 
 /**
@@ -792,25 +1264,31 @@ const getMyBookingsService = async (userId, role, queryParams = {}) => {
   const limitNum = Math.max(1, Number(limit) || 20);
   const skip = (pageNum - 1) * limitNum;
 
-  const query = {};
+  const userQuery = role === 'instructor' ? { instructor: userId } : { client: userId };
 
-  if (role === 'instructor') {
-    query.instructor = userId;
-  } else {
-    query.client = userId;
-  }
+  // 1. Auto-sync any accepted bookings whose start time has arrived to 'active'
+  await syncUserBookingsActiveStatus(userQuery);
+
+  const query = { ...userQuery };
 
   // Process Tab Filters
-  const rawTab = String(tab || statusFilter || 'upcoming').toLowerCase().trim();
+  const defaultTab = role === 'instructor' ? 'requests' : 'upcoming';
+  const rawTab = String(tab || statusFilter || defaultTab).toLowerCase().trim();
   const normalizedTab = rawTab;
 
   if (['upcoming', 'accepted'].includes(normalizedTab)) {
     query.status = 'accepted';
   } else if (normalizedTab === 'active') {
     query.status = 'active';
-  } else if (normalizedTab === 'completed') {
+    query.instructorCompleted = { $ne: true };
+  } else if (['to_confirm', 'toconfirm', 'confirm', 'pending_approval', 'pendingapproval'].includes(normalizedTab)) {
+    // Instructor marked complete, waiting for client/parent confirmation
+    query.instructorCompleted = true;
+    query.clientCompleted = { $ne: true };
+    query.status = { $ne: 'completed' };
+  } else if (['completed', 'complete'].includes(normalizedTab)) {
     query.status = 'completed';
-  } else if (['requests', 'to_confirm', 'requested', 'pending', 'pending_approval'].includes(normalizedTab)) {
+  } else if (['requests', 'requested', 'pending'].includes(normalizedTab)) {
     if (role === 'instructor') {
       query.status = 'pending';
     } else {
@@ -818,7 +1296,7 @@ const getMyBookingsService = async (userId, role, queryParams = {}) => {
     }
   } else if (['unpaid', 'pending_payment'].includes(normalizedTab)) {
     query.status = 'pending_payment';
-  } else if (['cancelled', 'declined'].includes(normalizedTab)) {
+  } else if (['cancelled', 'declined', 'cancel'].includes(normalizedTab)) {
     query.status = { $in: ['cancelled', 'declined'] };
   } else if (normalizedTab === 'all') {
     if (statusFilter) {
@@ -838,7 +1316,7 @@ const getMyBookingsService = async (userId, role, queryParams = {}) => {
   }
 
   let sortOrder = { date: -1, createdAt: -1 };
-  if (['upcoming', 'accepted', 'requests', 'to_confirm', 'requested', 'pending'].includes(normalizedTab)) {
+  if (['upcoming', 'accepted', 'requests', 'to_confirm', 'requested', 'pending', 'pending_approval'].includes(normalizedTab)) {
     sortOrder = { date: 1, startTime: 1 };
   }
 
@@ -848,11 +1326,45 @@ const getMyBookingsService = async (userId, role, queryParams = {}) => {
       .populate('instructor', 'fullName email image')
       .populate('clientReview')
       .populate('instructorReview')
+      .populate('chat', '_id')
       .sort(sortOrder)
       .skip(skip)
       .limit(limitNum),
     Booking.countDocuments(query)
   ]);
+
+  // Ensure chat is linked for each booking so chatId is never null
+  const Chat = require('../Chat/chat.model');
+  const missingChatBookings = bookings.filter((b) => !b.chat && b.client && b.instructor);
+  if (missingChatBookings.length > 0) {
+    await Promise.all(
+      missingChatBookings.map(async (b) => {
+        try {
+          const clientId = b.client._id || b.client;
+          const instructorId = b.instructor._id || b.instructor;
+          let chat = await Chat.findOne({
+            participants: { $all: [clientId, instructorId] }
+          });
+          if (!chat) {
+            chat = await Chat.create({
+              participants: [clientId, instructorId],
+              booking: b._id,
+              unreadCounts: {
+                [clientId.toString()]: 0,
+                [instructorId.toString()]: 0
+              }
+            });
+          }
+          if (chat) {
+            b.chat = chat._id;
+            await Booking.findByIdAndUpdate(b._id, { $set: { chat: chat._id } });
+          }
+        } catch (e) {
+          // continue cleanly
+        }
+      })
+    );
+  }
 
   const formattedBookings = bookings.map((b) =>
     role === 'instructor' ? formatInstructorBookingCard(b) : formatUserBookingCard(b)
@@ -870,15 +1382,32 @@ const getMyBookingsService = async (userId, role, queryParams = {}) => {
 };
 
 /**
- * Get Tab Counts for switcher badges
+ * Get Tab Counts for switcher badges (matching User and Instructor Figma screens)
  */
 const getBookingTabCountsService = async (userId, role) => {
   const userQuery = role === 'instructor' ? { instructor: userId } : { client: userId };
 
-  const [pendingCount, acceptedUpcomingCount, activeCount, completedCount, cancelledCount, pendingPaymentCount] = await Promise.all([
+  // Auto-sync any accepted bookings whose start time has arrived to 'active'
+  await syncUserBookingsActiveStatus(userQuery);
+
+  const [
+    pendingCount,
+    acceptedUpcomingCount,
+    activeCount,
+    pendingApprovalCount,
+    completedCount,
+    cancelledCount,
+    pendingPaymentCount
+  ] = await Promise.all([
     Booking.countDocuments({ ...userQuery, status: 'pending' }),
     Booking.countDocuments({ ...userQuery, status: 'accepted' }),
-    Booking.countDocuments({ ...userQuery, status: 'active' }),
+    Booking.countDocuments({ ...userQuery, status: 'active', instructorCompleted: { $ne: true } }),
+    Booking.countDocuments({
+      ...userQuery,
+      instructorCompleted: true,
+      clientCompleted: { $ne: true },
+      status: { $ne: 'completed' }
+    }),
     Booking.countDocuments({ ...userQuery, status: 'completed' }),
     Booking.countDocuments({ ...userQuery, status: { $in: ['cancelled', 'declined'] } }),
     Booking.countDocuments({ ...userQuery, status: 'pending_payment' })
@@ -887,26 +1416,32 @@ const getBookingTabCountsService = async (userId, role) => {
   if (role === 'instructor') {
     return {
       requests: pendingCount,
-      pendingApproval: pendingCount,
+      requested: pendingCount,
       active: activeCount,
       upcoming: acceptedUpcomingCount,
       completed: completedCount,
+      complete: completedCount,
       cancelled: cancelledCount,
-      total: pendingCount + acceptedUpcomingCount + activeCount + completedCount + cancelledCount
+      pendingApproval: pendingApprovalCount,
+      toConfirm: pendingApprovalCount,
+      total: pendingCount + acceptedUpcomingCount + activeCount + pendingApprovalCount + completedCount + cancelledCount
     };
   }
 
+  // User
+  const requestedTotal = pendingCount + pendingPaymentCount;
   return {
-    requests: pendingCount + pendingPaymentCount,
-    unpaid: pendingPaymentCount,
-    pending: pendingCount,
     upcoming: acceptedUpcomingCount,
     active: activeCount,
     completed: completedCount,
-    toConfirm: pendingCount,
-    requested: pendingCount,
+    complete: completedCount,
+    toConfirm: pendingApprovalCount,
+    pendingApproval: pendingApprovalCount,
+    requested: requestedTotal,
+    requests: requestedTotal,
+    unpaid: pendingPaymentCount,
     cancelled: cancelledCount,
-    total: pendingCount + acceptedUpcomingCount + activeCount + completedCount + cancelledCount + pendingPaymentCount
+    total: acceptedUpcomingCount + activeCount + pendingApprovalCount + completedCount + requestedTotal + cancelledCount
   };
 };
 
@@ -945,10 +1480,47 @@ const getBookingByIdService = async (bookingId, userId, userRole) => {
     .populate('client', 'fullName email image number address createdAt avgRating totalReviews ratingCount')
     .populate('instructor', 'fullName email image number bio address certifications avgRating totalReviews ratingCount')
     .populate('clientReview')
-    .populate('instructorReview');
+    .populate('instructorReview')
+    .populate('chat', '_id');
 
   if (!booking) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
+  }
+
+  // Ensure chat is linked so chatId is always provided
+  let resolvedChatId = booking.chat?._id ? booking.chat._id.toString() : (booking.chat ? booking.chat.toString() : '');
+  if (!resolvedChatId && booking.client && booking.instructor) {
+    try {
+      const Chat = require('../Chat/chat.model');
+      const clientId = booking.client._id || booking.client;
+      const instructorId = booking.instructor._id || booking.instructor;
+      let chat = await Chat.findOne({
+        participants: { $all: [clientId, instructorId] }
+      });
+      if (!chat) {
+        chat = await Chat.create({
+          participants: [clientId, instructorId],
+          booking: booking._id,
+          unreadCounts: {
+            [clientId.toString()]: 0,
+            [instructorId.toString()]: 0
+          }
+        });
+      }
+      if (chat) {
+        resolvedChatId = chat._id.toString();
+        booking.chat = chat._id;
+        await Booking.findByIdAndUpdate(booking._id, { $set: { chat: chat._id } });
+      }
+    } catch (chatErr) {
+      // continue cleanly
+    }
+  }
+
+  // If accepted and start time has arrived, auto-sync to 'active'
+  if (booking.status === 'accepted' && isBookingTimeStarted(booking)) {
+    booking.status = 'active';
+    await Booking.findByIdAndUpdate(booking._id, { $set: { status: 'active' } });
   }
 
   const isClient = booking.client && booking.client._id && userId && booking.client._id.toString() === userId.toString();
@@ -960,6 +1532,11 @@ const getBookingByIdService = async (bookingId, userId, userRole) => {
   }
 
   const b = booking.toObject ? booking.toObject() : booking;
+  const inProgress = getIsInProgress(b);
+  const effectiveStatus = (b.status === 'accepted' && inProgress) ? 'active' : b.status;
+  const clientCompleted = b.status === 'completed' || Boolean(b.clientCompleted);
+  const instructorCompleted = b.status === 'completed' || Boolean(b.instructorCompleted);
+  const bothCompleted = b.status === 'completed' || (clientCompleted && instructorCompleted);
 
   // Real client stats from database (if client exists)
   let clientStats = null;
@@ -1043,7 +1620,7 @@ const getBookingByIdService = async (bookingId, userId, userRole) => {
 
   // Expiration countdown for pending booking requests
   let expiresIn = null;
-  if (b.status === 'pending' && b.expiresAt) {
+  if (effectiveStatus === 'pending' && b.expiresAt) {
     const diffMs = new Date(b.expiresAt).getTime() - Date.now();
     if (diffMs <= 0) {
       expiresIn = 'Expired';
@@ -1068,14 +1645,29 @@ const getBookingByIdService = async (bookingId, userId, userRole) => {
   return {
     _id: b._id,
     bookingId: b.bookingId || '',
-    status: b.status,
+    status: effectiveStatus,
+    rawStatus: b.status,
+    inProgress,
+    isInProgress: inProgress,
+    clientCompleted,
+    instructorCompleted,
+    isClientCompleted: clientCompleted,
+    isInstructorCompleted: instructorCompleted,
+    bothCompleted,
+    waitingForOtherParty: (
+      (isClient && clientCompleted && !instructorCompleted) ||
+      (isInstructor && instructorCompleted && !clientCompleted)
+    ),
+    clientCompletedAt: b.clientCompletedAt || null,
+    instructorCompletedAt: b.instructorCompletedAt || null,
+    completedAt: b.completedAt || null,
     formattedDate,
     lessonSubtitle,
     startTime: b.startTime || '',
     endTime: b.endTime || '',
     time: b.startTime && b.endTime ? `${b.startTime} – ${b.endTime}` : (b.startTime || ''),
     lessonType: b.lessonType || '60-min private lesson',
-    ...(b.status === 'pending' && expiresIn ? { expiresIn } : {}),
+    ...(effectiveStatus === 'pending' && expiresIn ? { expiresIn } : {}),
     pricing: {
       parentPays,
       commissionPercentage,
@@ -1093,16 +1685,14 @@ const getBookingByIdService = async (bookingId, userId, userRole) => {
       cancels: clientStats?.cancels || 0,
       memberSince: clientStats?.memberSince || 'New'
     } : null,
-    ...(userRole === 'user' && b.instructor ? {
-      instructor: {
-        _id: b.instructor._id,
-        fullName: b.instructor.fullName || '',
-        image: b.instructor.image || '',
-        rating: instructorRating,
-        totalReviews: instructorReviewCount,
-        ratingText: instructorReviewCount > 0 ? `${instructorRating.toFixed(1)} (${instructorReviewCount} review${instructorReviewCount === 1 ? '' : 's'})` : 'No reviews yet'
-      }
-    } : {}),
+    instructor: b.instructor ? {
+      _id: b.instructor._id,
+      fullName: b.instructor.fullName || '',
+      image: b.instructor.image || '',
+      rating: instructorRating,
+      totalReviews: instructorReviewCount,
+      ratingText: instructorReviewCount > 0 ? `${instructorRating.toFixed(1)} (${instructorReviewCount} review${instructorReviewCount === 1 ? '' : 's'})` : 'No reviews yet'
+    } : null,
     swimmer: {
       name: b.swimmer?.name || '',
       age: b.swimmer?.age || 0,
@@ -1118,53 +1708,145 @@ const getBookingByIdService = async (bookingId, userId, userRole) => {
       method: b.payment?.method || 'card',
       status: b.payment?.status || 'unpaid',
       transactionId: b.payment?.transactionId || '',
-      paidAt: b.payment?.paidAt || null,
-      stripePaymentIntentId: b.payment?.stripePaymentIntentId || '',
-      stripeClientSecret: b.payment?.stripeClientSecret || '',
-      stripeRefundId: b.payment?.stripeRefundId || ''
+      ...(b.payment?.paidAt ? { paidAt: b.payment.paidAt } : {})
     },
-    ...(b.payment?.stripeClientSecret ? {
-      stripe: {
-        clientSecret: b.payment.stripeClientSecret,
-        paymentIntentId: b.payment.stripePaymentIntentId || b.payment.transactionId || '',
-        amount: b.pricing?.totalAmount || 0,
-        currency: 'usd'
-      }
+    ...(['cancelled', 'declined'].includes(effectiveStatus) ? {
+      cancelledBy: b.cancelledBy || null,
+      cancellationReason: b.cancellationReason || null,
+      cancellationWindow: b.cancellationWindow || null,
+      refundAmount: Number(b.refundAmount || 0),
+      cancelledAt: b.cancelledAt || null
     } : {}),
     scheduleConflict,
-    chatId: b.chat?._id || b.chat || null,
-    canChat: ['accepted', 'active'].includes(b.status),
+    chatId: resolvedChatId || (b.chat?._id ? b.chat._id.toString() : (b.chat ? b.chat.toString() : '')),
+    canChat: ['accepted', 'active', 'completed'].includes(effectiveStatus),
     canAccept: b.status === 'pending',
     canDecline: b.status === 'pending',
-    canStart: b.status === 'accepted',
-    canComplete: b.status === 'active',
-    canCancel: ['pending', 'accepted'].includes(b.status)
+    canStart: b.status === 'accepted' && !inProgress,
+    canComplete: ['accepted', 'active'].includes(effectiveStatus) && (
+      isAdmin
+        ? true
+        : isInstructor
+          ? !b.instructorCompleted
+          : !b.clientCompleted
+    ),
+    canCancel: ['pending', 'accepted'].includes(b.status) && !inProgress
   };
 };
 
 /**
- * Send Booking Reminder (Instructor reminds client on completed booking - Figma Node 40012368:3011)
+ * Send Booking Reminder
  */
 const sendBookingReminderService = async (bookingId, instructorId) => {
   if (!mongoose.Types.ObjectId.isValid(bookingId)) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid Booking ID');
   }
 
-  const booking = await Booking.findById(bookingId).populate('client', 'fullName email');
+  const booking = await Booking.findById(bookingId)
+    .populate('client', 'fullName email')
+    .populate('instructor', 'fullName email image');
+
   if (!booking) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
   }
 
-  if (booking.instructor.toString() !== instructorId.toString()) {
+  const instructorIdStr = (booking.instructor?._id || booking.instructor || '').toString();
+  if (instructorIdStr !== instructorId.toString()) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Only the instructor can send a reminder for this booking');
   }
 
-  if (booking.status !== 'completed') {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Reminders can only be sent for completed bookings');
+  if (booking.status !== 'completed' && !booking.instructorCompleted) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Reminders can only be sent for completed or pending approval bookings');
   }
 
   booking.lastRemindedAt = new Date();
   await booking.save();
+
+  // 1. Send branded HTML reminder email to client
+  if (booking.client && booking.client.email) {
+    const clientName = booking.client.fullName || 'Swimmer / Parent';
+    const instructorName = booking.instructor?.fullName || 'Your Instructor';
+    const swimmerName = booking.swimmer?.name || 'Swimmer';
+    const lessonTitle = booking.lessonType || 'Private Swimming Lesson';
+    const poolName = booking.location?.poolName || booking.location?.address || 'Designated Pool';
+
+    const bookingDate = parseBookingDate(booking.date);
+    const daysShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    let formattedDate = '';
+    if (bookingDate && !isNaN(bookingDate.getTime())) {
+      formattedDate = `${daysShort[bookingDate.getDay()]}, ${monthsShort[bookingDate.getMonth()]} ${bookingDate.getDate()} · ${booking.startTime || ''}`;
+    }
+
+    const emailHtml = `
+      <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+        <div style="background: linear-gradient(135deg, #0077b6 0%, #0096c7 100%); padding: 28px 24px; text-align: center;">
+          <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.5px;">Swimletes</h1>
+          <p style="color: #e0f2fe; margin: 6px 0 0; font-size: 14px;">Lesson Completion Reminder</p>
+        </div>
+        
+        <div style="padding: 28px 24px; color: #334155; line-height: 1.6;">
+          <p style="font-size: 16px; margin: 0 0 16px;">Hi <strong>${clientName}</strong>,</p>
+          <p style="font-size: 15px; margin: 0 0 20px;">
+            Your instructor <strong>${instructorName}</strong> has marked your swimming lesson as completed and is waiting for your confirmation.
+          </p>
+
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px; margin-bottom: 24px;">
+            <h3 style="margin: 0 0 12px; color: #0f172a; font-size: 15px; font-weight: 600; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Lesson Details</h3>
+            <p style="margin: 4px 0; font-size: 14px;"><strong>Swimmer:</strong> ${swimmerName}</p>
+            <p style="margin: 4px 0; font-size: 14px;"><strong>Lesson:</strong> ${lessonTitle}</p>
+            ${formattedDate ? `<p style="margin: 4px 0; font-size: 14px;"><strong>Date & Time:</strong> ${formattedDate}</p>` : ''}
+            <p style="margin: 4px 0; font-size: 14px;"><strong>Location:</strong> ${poolName}</p>
+          </div>
+
+          <div style="background-color: #f0f9ff; border-left: 4px solid #0284c7; padding: 14px 18px; margin-bottom: 24px; border-radius: 4px;">
+            <p style="margin: 0; color: #0369a1; font-size: 14px; font-weight: 500;">
+              Please open the Swimletes app, go to your <strong>To Confirm</strong> tab, and tap <strong>"It happened"</strong> to verify the lesson was successfully held.
+            </p>
+            <p style="margin: 8px 0 0; color: #64748b; font-size: 13px;">
+              <em>Note: If you do not respond, the lesson will be automatically confirmed in 72 hours.</em>
+            </p>
+          </div>
+
+          <p style="font-size: 14px; color: #64748b; margin: 0 0 6px;">Thank you for swimming with Swimletes!</p>
+        </div>
+
+        <div style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 16px; text-align: center;">
+          <p style="margin: 0; font-size: 12px; color: #94a3b8;">
+            © ${new Date().getFullYear()} Swimletes. All rights reserved.
+          </p>
+        </div>
+      </div>
+    `;
+
+    try {
+      await emailWithNodemailer({
+        // email: "mdnasifurahman@gmail.com",
+        email: booking.client.email,
+        subject: `Reminder: Please confirm your completed swim lesson with ${instructorName}`,
+        html: emailHtml
+      });
+    } catch (emailErr) {
+      console.error('Failed to send booking reminder email:', emailErr.message);
+    }
+  }
+
+  // 2. Real-time socket notification if client is online
+  try {
+    if (global.io && booking.client && booking.client._id) {
+      global.io.emit(`get notification::${booking.client._id.toString()}`, {
+        status: 200,
+        message: `${booking.instructor?.fullName || 'Instructor'} sent a reminder to confirm your completed lesson`,
+        data: {
+          bookingId: booking._id,
+          type: 'booking_reminder',
+          remindedAt: booking.lastRemindedAt
+        }
+      });
+    }
+  } catch (socketErr) {
+    console.error('Failed to emit socket notification for reminder:', socketErr.message);
+  }
 
   return {
     message: `Reminder sent to ${booking.client?.fullName || 'client'} successfully`,
@@ -1353,9 +2035,10 @@ const markBookingActiveService = async (bookingId, userId, userRole) => {
 };
 
 /**
- * Instructor Marks Booking as Complete (Figma Node 40012335:5965)
+ * Complete Booking - Two-sided confirmation: both client and instructor must mark as complete
+ * (Figma Screen & Requirement: User & Instructor both mark it as complete)
  */
-const completeBookingService = async (bookingId, instructorId) => {
+const completeBookingService = async (bookingId, userId, userRole = null) => {
   if (!mongoose.Types.ObjectId.isValid(bookingId)) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid Booking ID');
   }
@@ -1365,26 +2048,92 @@ const completeBookingService = async (bookingId, instructorId) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
   }
 
-  if (booking.instructor.toString() !== instructorId.toString()) {
-    throw new ApiError(httpStatus.FORBIDDEN, 'Only the assigned instructor can mark this booking as complete');
+  const isClient = booking.client.toString() === userId.toString();
+  const isInstructor = booking.instructor.toString() === userId.toString();
+  const isAdmin = userRole === 'admin';
+
+  if (!isClient && !isInstructor && !isAdmin) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'You are not authorized to mark this booking as complete');
+  }
+
+  if (booking.status === 'completed') {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'This booking has already been marked as complete by both parties');
   }
 
   if (!['accepted', 'active'].includes(booking.status)) {
     throw new ApiError(httpStatus.BAD_REQUEST, `Cannot complete a booking with status '${booking.status}'`);
   }
 
-  booking.status = 'completed';
-  booking.completedAt = new Date();
-  await booking.save();
+  const now = new Date();
 
-  await User.findByIdAndUpdate(instructorId, { $inc: { lessonsTaught: 1 } });
+  if (isAdmin) {
+    booking.clientCompleted = true;
+    booking.instructorCompleted = true;
+    booking.clientCompletedAt = booking.clientCompletedAt || now;
+    booking.instructorCompletedAt = booking.instructorCompletedAt || now;
+    booking.status = 'completed';
+    booking.completedAt = now;
+  } else if (isClient) {
+    if (!booking.instructorCompleted) {
+      throw new ApiError(httpStatus.BAD_REQUEST, 'The instructor must first mark the lesson as complete before you can confirm.');
+    }
+    if (booking.clientCompleted) {
+      throw new ApiError(httpStatus.BAD_REQUEST, 'You have already confirmed this lesson.');
+    }
+    booking.clientCompleted = true;
+    booking.clientCompletedAt = now;
+    booking.status = 'completed';
+    booking.completedAt = now;
+  } else if (isInstructor) {
+    if (booking.instructorCompleted) {
+      throw new ApiError(httpStatus.BAD_REQUEST, 'You have already marked this lesson as complete. Payout releases automatically in 72 hours if client does not confirm.');
+    }
+    booking.instructorCompleted = true;
+    booking.instructorCompletedAt = now;
+    booking.autoConfirmAt = new Date(now.getTime() + 72 * 60 * 60 * 1000); // 72 hours / 3 days
+
+    if (booking.clientCompleted) {
+      booking.status = 'completed';
+      booking.completedAt = now;
+    } else {
+      booking.status = 'active'; // Moves to "pending approval" on instructor end, "to confirm" on client end
+    }
+  }
+
+  // Increment instructor lessons taught count once both complete
+  if (booking.status === 'completed') {
+    await User.findByIdAndUpdate(booking.instructor, { $inc: { lessonsTaught: 1 } });
+  }
+
+  await booking.save();
 
   const populated = await Booking.findById(booking._id)
     .populate('client', 'fullName email image')
     .populate('instructor', 'fullName email image')
-    .populate('clientReview');
+    .populate('clientReview')
+    .populate('instructorReview');
 
-  return formatInstructorBookingCard(populated);
+  const card = (userRole === 'instructor' || (!userRole && isInstructor))
+    ? formatInstructorBookingCard(populated)
+    : formatUserBookingCard(populated);
+
+  let completionMessage = '';
+  if (booking.status === 'completed') {
+    completionMessage = 'Lesson confirmed and completed successfully!';
+  } else if (isInstructor) {
+    completionMessage = 'You marked the lesson as complete. Client has 72 hours (3 days) to confirm before automatic payout release.';
+  } else {
+    completionMessage = 'Lesson confirmed successfully! Marked as completed.';
+  }
+
+  return {
+    ...card,
+    message: completionMessage,
+    clientCompleted: booking.clientCompleted,
+    instructorCompleted: booking.instructorCompleted,
+    bothCompleted: booking.status === 'completed',
+    status: booking.status
+  };
 };
 
 /**
@@ -1412,7 +2161,8 @@ const cancelBookingService = async (bookingId, userId, userRole, reason = '') =>
     throw new ApiError(httpStatus.BAD_REQUEST, `Cannot cancel a booking with status '${booking.status}'`);
   }
 
-  const lessonDate = new Date(booking.date);
+  const { startDateTime } = getBookingDateTimes(booking);
+  const lessonDate = startDateTime || new Date(booking.date);
   const diffHours = (lessonDate.getTime() - Date.now()) / (1000 * 60 * 60);
 
   let cancellationWindow = 'free';
@@ -1522,7 +2272,7 @@ const updateBookingStatusService = async (bookingId, userId, userRole, status, p
     return declineBookingService(bookingId, userId, payload.reason);
   }
   if (status === 'completed') {
-    return completeBookingService(bookingId, userId);
+    return completeBookingService(bookingId, userId, userRole);
   }
   if (status === 'active') {
     return markBookingActiveService(bookingId, userId, userRole);
@@ -1597,10 +2347,13 @@ const getAdminBookingsListService = async (queryParams = {}) => {
   const limitNum = Math.max(1, Number(limit) || 10);
   const skip = (pageNum - 1) * limitNum;
 
+  // Auto-sync accepted bookings whose start time has arrived to 'active'
+  await syncAllAcceptedBookings();
+
   // 1. Fetch total counts across tab categories
   const [allCount, upcomingCount, activeCount, completedCount, cancelledCount] = await Promise.all([
     Booking.countDocuments({}),
-    Booking.countDocuments({ status: { $in: ['accepted', 'pending'] } }),
+    Booking.countDocuments({ status: 'accepted' }),
     Booking.countDocuments({ status: 'active' }),
     Booking.countDocuments({ status: 'completed' }),
     Booking.countDocuments({ status: { $in: ['cancelled', 'declined'] } })
@@ -1610,13 +2363,15 @@ const getAdminBookingsListService = async (queryParams = {}) => {
 
   if (status && status !== 'all') {
     if (status === 'upcoming') {
-      filter.status = { $in: ['accepted', 'pending'] };
+      filter.status = 'accepted';
     } else if (status === 'active') {
       filter.status = 'active';
-    } else if (status === 'completed') {
+    } else if (['completed', 'complete'].includes(status)) {
       filter.status = 'completed';
-    } else if (status === 'cancelled') {
+    } else if (['cancelled', 'declined'].includes(status)) {
       filter.status = { $in: ['cancelled', 'declined'] };
+    } else if (['requested', 'requests', 'pending'].includes(status)) {
+      filter.status = 'pending';
     } else {
       filter.status = status;
     }
@@ -1671,8 +2426,10 @@ const getAdminBookingsListService = async (queryParams = {}) => {
     const formattedDate = formatSimpleDate(b.date) || 'N/A';
     const totalAmount = Number(b.pricing?.totalAmount || b.pricing?.lessonPrice || 0);
 
+    const inProgress = getIsInProgress(b);
     let displayStatus = b.status || 'pending';
-    if (displayStatus === 'accepted') displayStatus = 'upcoming';
+    if (displayStatus === 'accepted' && inProgress) displayStatus = 'active';
+    else if (displayStatus === 'accepted') displayStatus = 'upcoming';
     if (displayStatus === 'declined') displayStatus = 'cancelled';
 
     const statusBadge = displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1);
@@ -1691,6 +2448,13 @@ const getAdminBookingsListService = async (queryParams = {}) => {
     return {
       _id: b._id,
       bookingId: b.bookingId || `BK-${b._id.toString().slice(-5).toUpperCase()}`,
+      status: displayStatus,
+      rawStatus: b.status,
+      inProgress,
+      isInProgress: inProgress,
+      clientCompleted: b.status === 'completed' || Boolean(b.clientCompleted),
+      instructorCompleted: b.status === 'completed' || Boolean(b.instructorCompleted),
+      bothCompleted: b.status === 'completed' || (Boolean(b.clientCompleted) && Boolean(b.instructorCompleted)),
       client: {
         _id: b.client?._id || null,
         fullName: b.client?.fullName || 'Client',
@@ -1717,7 +2481,6 @@ const getAdminBookingsListService = async (queryParams = {}) => {
       time: b.startTime || 'N/A',
       amount: totalAmount,
       formattedAmount: `$${totalAmount.toLocaleString('en-US')}`,
-      status: displayStatus,
       statusBadge,
       createdAt: b.createdAt
     };
@@ -1784,8 +2547,10 @@ const getAdminBookingDetailsService = async (bookingId) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
   }
 
+  const inProgress = getIsInProgress(booking);
   let displayStatus = booking.status || 'pending';
-  if (displayStatus === 'accepted') displayStatus = 'upcoming';
+  if (displayStatus === 'accepted' && inProgress) displayStatus = 'active';
+  else if (displayStatus === 'accepted') displayStatus = 'upcoming';
   if (displayStatus === 'declined') displayStatus = 'cancelled';
 
   const statusBadge = displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1);
@@ -1836,6 +2601,12 @@ const getAdminBookingDetailsService = async (bookingId) => {
     _id: booking._id,
     bookingId: booking.bookingId || `BK-${booking._id.toString().slice(-5).toUpperCase()}`,
     status: displayStatus,
+    rawStatus: booking.status,
+    inProgress,
+    isInProgress: inProgress,
+    clientCompleted: booking.status === 'completed' || Boolean(booking.clientCompleted),
+    instructorCompleted: booking.status === 'completed' || Boolean(booking.instructorCompleted),
+    bothCompleted: booking.status === 'completed' || (Boolean(booking.clientCompleted) && Boolean(booking.instructorCompleted)),
     statusBadge,
     client: {
       _id: booking.client?._id || null,
@@ -1919,6 +2690,10 @@ const adminUpdateBookingStatusService = async (bookingId, payload = {}) => {
     updateData.status = status;
     if (status === 'completed') {  
       updateData.completedAt = new Date();
+      updateData.clientCompleted = true;
+      updateData.instructorCompleted = true;
+      updateData.clientCompletedAt = new Date();
+      updateData.instructorCompletedAt = new Date();
     }
     if (status === 'cancelled') {
       updateData.cancelledBy = 'admin';
@@ -2643,11 +3418,63 @@ const handleStripeWebhookService = async (rawBody, signature, bodyData = null) =
   return { received: true };
 };
 
+/**
+ * Get or Create Chat for a Booking
+ */
+const getBookingChatService = async (bookingId, userId) => {
+  if (!mongoose.Types.ObjectId.isValid(bookingId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid Booking ID');
+  }
+
+  const booking = await Booking.findById(bookingId).populate('client instructor chat');
+  if (!booking) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
+  }
+
+  const isClient = booking.client && booking.client._id && userId && booking.client._id.toString() === userId.toString();
+  const isInstructor = booking.instructor && booking.instructor._id && userId && booking.instructor._id.toString() === userId.toString();
+
+  if (userId && !isClient && !isInstructor) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'You are not a participant in this booking');
+  }
+
+  const Chat = require('../Chat/chat.model');
+  let chat = booking.chat;
+
+  if (!chat) {
+    chat = await Chat.findOne({
+      participants: { $all: [booking.client._id, booking.instructor._id] }
+    });
+
+    if (!chat) {
+      chat = await Chat.create({
+        participants: [booking.client._id, booking.instructor._id],
+        booking: booking._id,
+        unreadCounts: {
+          [booking.client._id.toString()]: 0,
+          [booking.instructor._id.toString()]: 0
+        }
+      });
+    }
+
+    booking.chat = chat._id;
+    await booking.save();
+  }
+
+  return {
+    chatId: chat._id || chat,
+    bookingId: booking._id,
+    participants: chat.participants || [booking.client._id, booking.instructor._id],
+    chat
+  };
+};
+
 module.exports = {
   createBookingService,
   getMyBookingsService,
   getBookingTabCountsService,
   getBookingByIdService,
+  getBookingChatService,
   acceptBookingService,
   declineBookingService,
   markBookingActiveService,
@@ -2672,7 +3499,13 @@ module.exports = {
   getBookingReviewDetailsService,
   getBookingConfirmationDetailsService,
   checkBookingConflict,
-  checkBookingConflictService
+  checkBookingConflictService,
+  getBookingDateTimes,
+  isBookingTimeStarted,
+  getIsInProgress,
+  syncUserBookingsActiveStatus,
+  syncAllAcceptedBookings,
+  syncAutoConfirmedBookings
 };
 
 

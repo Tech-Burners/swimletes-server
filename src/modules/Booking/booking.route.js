@@ -6,6 +6,7 @@ const {
   getMyBookings,
   getBookingTabCounts,
   getBookingDetails,
+  getBookingChat,
   acceptBooking,
   declineBooking,
   startBooking,
@@ -87,11 +88,14 @@ router.get('/tab-counts', auth(['user', 'instructor', 'admin']), getBookingTabCo
 // 4. Rebook / Book Again helper (User)
 router.get('/:id/rebook', auth(['user']), rebookLesson);
 
-// 5. Instructor Action Endpoints
+// 5. Completion & Instructor Action Endpoints
 router.patch('/:id/accept', auth(['instructor', 'admin']), acceptBooking);
 router.patch('/:id/decline', auth(['instructor', 'admin']), declineBooking);
 router.patch('/:id/start', auth(['instructor', 'admin']), startBooking);
-router.patch('/:id/complete', auth(['instructor', 'admin']), completeBooking);
+router.patch('/:id/confirm', auth(['user', 'admin']), completeBooking);
+router.post('/:id/confirm', auth(['user', 'admin']), completeBooking);
+router.patch('/:id/complete', auth(['user', 'instructor', 'admin']), completeBooking);
+router.post('/:id/complete', auth(['user', 'instructor', 'admin']), completeBooking);
 router.post('/:id/remind', auth(['instructor', 'admin']), sendBookingReminder);
 router.post('/:id/send-reminder', auth(['instructor', 'admin']), sendBookingReminder);
 
@@ -109,7 +113,11 @@ router.get('/confirmed/:id', auth(['user', 'instructor', 'admin'], { optional: t
 router.get('/:id/confirmed', auth(['user', 'instructor', 'admin'], { optional: true }), getBookingConfirmationDetails);
 router.get('/:id/confirmation', auth(['user', 'instructor', 'admin'], { optional: true }), getBookingConfirmationDetails);
 
-// 9. Booking Details by ID (Figma 40012321:3120)
+// 9. Booking Chat by ID
+router.get('/:id/chat', auth(['user', 'instructor', 'admin']), getBookingChat);
+router.post('/:id/chat', auth(['user', 'instructor', 'admin']), getBookingChat);
+
+// 10. Booking Details by ID (Figma 40012321:3120)
 router.get('/request/:id', auth(['user', 'instructor', 'admin'], { optional: true }), getBookingDetails);
 router.get('/:id', auth(['user', 'instructor', 'admin'], { optional: true }), getBookingDetails);
 
