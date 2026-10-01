@@ -10,6 +10,9 @@ const reviewRoutes = require('../modules/Review/review.route');
 const favouriteRoutes = require('../modules/Favourite/favourite.route');
 const reportRoutes = require('../modules/Report/report.route');
 const chatRoutes = require('../modules/Chat/chat.route');
+const earningsRoutes = require('../modules/Earnings/earnings.route');
+
+const refundRoutes = require('../modules/Booking/refund.route');
 
 const moduleRoutes = [
   {
@@ -79,6 +82,30 @@ const moduleRoutes = [
   {
     path: '/disputes',
     route: reportRoutes
+  },
+  {
+    path: '/earnings',
+    route: earningsRoutes
+  },
+  {
+    path: '/transactions',
+    route: earningsRoutes
+  },
+  {
+    path: '/withdrawals',
+    route: earningsRoutes
+  },
+  {
+    path: '/withdrawal',
+    route: earningsRoutes
+  },
+  {
+    path: '/refund',
+    route: refundRoutes
+  },
+  {
+    path: '/refunds',
+    route: refundRoutes
   }
 ];
 

@@ -202,9 +202,9 @@
         log(clientNum, `Disconnected: ${reason}`);
       });
 
-      // 1. Listen for new messages
-      socket.on('newMessage', (msg) => {
-        log(clientNum, `📩 newMessage from ${msg.sender?.fullName || 'Other'}: "${msg.text}"`, true);
+      // 1. Listen for new messages ('message' event)
+      socket.on('message', (msg) => {
+        log(clientNum, `📩 message from ${msg.sender?.fullName || 'Other'}: "${msg.text}"`, true);
         appendMessage(clientNum, msg.text, msg.sender?.fullName || 'Other', false);
       });
 
@@ -282,8 +282,8 @@
 
       const payload = { chatId, text };
 
-      socket.emit('sendMessage', payload, (res) => {
-        log(clientNum, `sendMessage ack: ` + JSON.stringify(res), true);
+      socket.emit('message', payload, (res) => {
+        log(clientNum, `message ack: ` + JSON.stringify(res), true);
         if (res.status === 200 || res.statusCode === 200) {
           appendMessage(clientNum, text, 'Me', true);
           input.value = '';

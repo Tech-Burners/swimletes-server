@@ -47,8 +47,16 @@ const getMyConversations = catchAsync(async (req, res) => {
 // 3. Get Chat Messages History - Figma Screen 2
 const getChatMessages = catchAsync(async (req, res) => {
   const { chatId } = req.params;
-  const { page = 1, limit = 30 } = req.query;
-  const result = await getChatMessagesService(req.User._id, chatId, { page, limit });
+  const { page = 1, limit = 30, sort, sortOrder, sortBy, separators, includeSeparators } = req.query;
+  const result = await getChatMessagesService(req.User._id, chatId, {
+    page,
+    limit,
+    sort,
+    sortOrder,
+    sortBy,
+    separators,
+    includeSeparators
+  });
 
   return res.status(status.OK).json(
     response({

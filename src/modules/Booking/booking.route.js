@@ -37,6 +37,10 @@ router.get('/admin/bookings/:id', auth(['admin']), getAdminBookingDetailsControl
 router.patch('/admin/bookings/:id/status', auth(['admin']), adminUpdateBookingStatusController);
 router.get('/admin/:id', auth(['admin']), getAdminBookingDetailsController);
 
+// Admin Refunds (Figma 40012554:21158)
+const refundRoutes = require('./refund.route');
+router.use('/admin/refunds', refundRoutes);
+
 // Real-time Booking Conflict Check
 router.get('/check-conflict', auth(['user', 'instructor', 'admin'], { optional: true }), checkBookingConflictController);
 router.post('/check-conflict', auth(['user', 'instructor', 'admin'], { optional: true }), checkBookingConflictController);

@@ -231,7 +231,17 @@ const getMyConversationsService = async (userId, { search = '', page = 1, limit 
 /**
  * Get Message History for a Chat - Figma Screen 2 (40012262:7458)
  */
-const getChatMessagesService = async (userId, chatId, { page = 1, limit = 30 }) => {
+const getChatMessagesService = async (userId, chatId, query = {}) => {
+  const {
+    page = 1,
+    limit = 30,
+    sort,
+    sortOrder = 'desc',
+    sortBy = 'createdAt',
+    separators,
+    includeSeparators
+  } = query;
+
   if (!mongoose.Types.ObjectId.isValid(chatId)) {
     throw new ApiError(status.BAD_REQUEST, 'Invalid Chat ID');
   }
@@ -255,11 +265,14 @@ const getChatMessagesService = async (userId, chatId, { page = 1, limit = 30 }) 
   const limitNum = Number(limit) || 30;
   const skip = (pageNum - 1) * limitNum;
 
-  // Fetch messages sorted ascending by date
+  const order = (sortOrder || sort || 'desc').toLowerCase();
+  const sortDirection = order === 'asc' ? 1 : -1;
+
+  // Fetch messages - sorted descending (newest first) by default
   const messages = await Message.find({ chatId })
     .populate('sender', '_id fullName image')
     .populate('replyTo', '_id text')
-    .sort({ createdAt: 1 })
+    .sort({ [sortBy]: sortDirection })
     .skip(skip)
     .limit(limitNum);
 
@@ -294,7 +307,8 @@ const getChatMessagesService = async (userId, chatId, { page = 1, limit = 30 }) 
     }
   }
 
-  // Group messages by Date header for UI rendering (e.g., '19 August', 'Today')
+  // Group messages by Date header for UI rendering (e.g., 'Today', 'Yesterday', '19 August')
+  const shouldIncludeSeparators = separators !== 'false' && includeSeparators !== 'false';
   const groupedMessages = [];
   let currentDate = '';
 
@@ -313,7 +327,7 @@ const getChatMessagesService = async (userId, chatId, { page = 1, limit = 30 }) 
       }
     }
 
-    if (dateLabel !== currentDate) {
+    if (shouldIncludeSeparators && dateLabel !== currentDate) {
       currentDate = dateLabel;
       groupedMessages.push({
         type: 'date_separator',
@@ -530,10 +544,12 @@ const sendMessageService = async (userId, { chatId, receiverId, text = '', image
     const senderRoom = `user::${userId.toString()}`;
 
     // 1. Emit to active chat room (for open conversation view)
+    io.to(chatRoom).emit('message', populatedMessage);
     io.to(chatRoom).emit('newMessage', populatedMessage);
     io.to(chatRoom).emit(`get message::${targetChat._id}`, populatedMessage);
 
-    // Also emit directly to receiver's room so they receive newMessage anywhere
+    // Also emit directly to receiver's room so they receive message anywhere
+    io.to(receiverRoom).emit('message', populatedMessage);
     io.to(receiverRoom).emit('newMessage', populatedMessage);
 
     // 2. Emit chat list update to receiver and sender (for inbox list screen)

@@ -106,13 +106,13 @@ const chatSocketHandler = (io, socket, connectedUsers) => {
       }
 
       // 2. Also emit directly to the sender's socket as an event
-      socket.emit('sendMessageError', errorPayload);
+      socket.emit('messageError', errorPayload);
       socket.emit('chatError', errorPayload);
       socket.emit('error', errorPayload);
     }
   };
 
-  socket.on('sendMessage', handleSendMessage);
+  // Real-Time Send Message (only 'message' event)
   socket.on('message', handleSendMessage);
 
   // 4. Real-Time Typing Indicator (Figma Screen 2)

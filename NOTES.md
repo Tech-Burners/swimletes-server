@@ -19,6 +19,8 @@
 | `Auth` | `/api/v1/auth` | User/Instructor authentication, register, login, session, social logins (Google, Apple), password reset | Active |
 | `Availability` | `/api/v1/availability` | Instructor weekly recurring schedules, working hours, and blocked time slots | Active |
 | `Booking` | `/api/v1/booking` | Complete lesson lifecycle (create, accept, decline, start, complete, cancel, rebook, tab counts, reminders, admin management) | Active (embeds `Swimmer`, `Waiver`, and `BookingLocation` schemas) |
+| `Earnings` | `/api/v1/earnings`, `/withdrawals` | Instructor earnings balance, withdrawal requests, Admin platform earnings analytics (5% booking fee, 15% commission), transaction breakdown, and pending/historical withdrawals | Active (`transaction.model.js`) |
+| `Refund` | `/api/v1/refunds`, `/refund`, `/booking/admin/refunds` | Admin refund ledger (dispute, cancellation, manual tabs), manual Stripe refund issuance, and refund details | Active (`refund.model.js`) |
 | `Favourite` | `/api/v1/favourite` | Parent/swimmer bookmarked and favorited instructors & pool locations | Active |
 | `Otp` | `/api/v1/auth/otp` | OTP generation & verification via Twilio SMS and Nodemailer email | Active |
 | `Report` | `/api/v1/report`, `/reports`, `/disputes` | Incident reports, dispute filing & admin resolution workflow | Active (handles both reports & disputes) |
@@ -34,6 +36,11 @@
 - **Waiver Agreement**: Managed within `src/modules/Booking/booking.model.js` (`waiverAgreementSchema` - digital signature, legal name, relationship, agreement timestamp).
 - **Pools & Locations**: Defined in `src/modules/ServiceAndPricing/serviceAndPricing.model.js` (`publicPoolSchema`, `ownPool`, `travelToClient`) and snapshot in `Booking`.
 - **Disputes & Reports**: Handled directly in `src/modules/Report/` (`report.model.js`, `report.service.js`, `report.controller.js`, `report.route.js`) with routes mapped to `/api/v1/report`, `/api/v1/reports`, and `/api/v1/disputes`. Follows the codebase standard: text fields bundled in `data` (JSON string/object) with file attachments (`image`/`photo`) passed separately. Admin disputes query (`GET /api/v1/disputes/admin`) is strictly read-only and returns only the exact columns displayed in the Figma table (`40012554:20231` - `bookingId`, `client`, `instructor`, `date`, `status`, `reason`), with full details (`amount`, `details`, `photos`, `resolution`) returned via drawer API (`GET /api/v1/disputes/admin/:id` - `40012554:20832`). Mobile "Report an issue" sheet (`40012392:3369`) served at `/instructor` and Admin Disputes portal & drawer served at `/admin`.
+- **Admin Financial & Operations Portals (Figma)**:
+  - **Admin Pending Withdrawals** (`40012563:21572`): `GET /api/v1/earnings/admin/withdrawals/pending` (returns instructor user details, bank accounts, requested amount, available balance at request, and relative request timestamp). Actionable via `PATCH .../approve` or `PATCH .../reject`.
+  - **Admin Withdrawal History** (`40012563:22328`): `GET /api/v1/earnings/admin/withdrawals/history` (includes completed/rejected timestamps and rejection reason tooltips).
+  - **Admin Refund Ledger** (`40012554:21158`): `GET /api/v1/booking/admin/refunds` (tab counts for all, dispute, cancellation, manual; search & sorting) & `POST /api/v1/booking/admin/refunds/issue` (executes Stripe refund and logs manual refund).
+  - **Admin Platform Earnings & Transactions** (`40012563:22986`): `GET /api/v1/earnings/admin/overview` (4 KPI cards: Total Revenue, 5% Booking Fee, 15% Platform Commission, Net Earnings after Refunds + 12-month analytics chart) & `GET /api/v1/earnings/admin/transactions` (Transaction breakdown table).
 - **Realtime Notifications & Socket**: Configured in `src/socket/` with `socketNotification.js` and `socketIO.js`.
 
 ---
