@@ -1,8 +1,16 @@
 const User = require("../modules/User/user.model");
 
-
 const seedAdmin = async () => {
   try {
+    const existingAdmin = await User.findOne({
+      email: process.env.ADMIN_EMAIL
+    });
+
+    if (existingAdmin) {
+      console.log("ℹ️ Admin user already exists. Skipping creation.");
+      return;
+    }
+
     await User.create({
       fullName: "Admin",
       email: process.env.ADMIN_EMAIL,
@@ -17,8 +25,9 @@ const seedAdmin = async () => {
   }
 };
 
-
 module.exports = {
   seedAdmin
-}
+};
+
+
 
