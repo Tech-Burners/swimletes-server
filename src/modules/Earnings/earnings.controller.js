@@ -10,7 +10,10 @@ const {
   getAdminWithdrawalDetailsService,
   adminActionWithdrawalService,
   getAdminPlatformEarningsOverviewService,
-  getAdminPlatformTransactionsService
+  getAdminPlatformTransactionsService,
+  getBankAccountService,
+  saveBankAccountService,
+  deleteBankAccountService
 } = require('./earnings.service');
 
 /**
@@ -163,6 +166,57 @@ const getAdminPlatformTransactions = catchAsync(async (req, res) => {
   );
 });
 
+/**
+ * 10. Get Bank Account Details (Figma Node 40012508:6741)
+ */
+const getBankAccount = catchAsync(async (req, res) => {
+  const targetUserId = req.query.userId || req.query.instructorId || req.User?._id || req.user?._id;
+  const result = await getBankAccountService(targetUserId);
+
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      message: 'Bank account details fetched successfully',
+      data: result
+    })
+  );
+});
+
+/**
+ * 11. Save / Update Bank Account Details (Figma Node 40012508:6741)
+ */
+const saveBankAccount = catchAsync(async (req, res) => {
+  const userId = req.User?._id || req.user?._id;
+  const result = await saveBankAccountService(userId, req.body);
+
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      message: result.message || 'Bank account saved successfully',
+      data: result.bankAccount
+    })
+  );
+});
+
+/**
+ * 12. Delete / Reset Bank Account Details (Figma Node 40012508:6741)
+ */
+const deleteBankAccount = catchAsync(async (req, res) => {
+  const userId = req.User?._id || req.user?._id;
+  const result = await deleteBankAccountService(userId);
+
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      message: result.message || 'Bank account removed successfully',
+      data: null
+    })
+  );
+});
+
 module.exports = {
   getInstructorEarningsOverview,
   getInstructorTransactionsHistory,
@@ -172,6 +226,9 @@ module.exports = {
   getAdminWithdrawalDetails,
   adminActionWithdrawal,
   getAdminPlatformEarningsOverview,
-  getAdminPlatformTransactions
+  getAdminPlatformTransactions,
+  getBankAccount,
+  saveBankAccount,
+  deleteBankAccount
 };
 

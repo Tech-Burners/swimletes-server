@@ -678,6 +678,7 @@ const allUserController = catchAsync(async (req, res) => {
     page: Number(req.query.page) || 1,
     limit: Number(req.query.limit) || 10,
     search: req.query.search || "",
+    status: req.query.status,
     isBan: req.query.isBan,
     role: req.query.role
   };

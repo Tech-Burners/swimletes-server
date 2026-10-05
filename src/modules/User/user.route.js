@@ -37,12 +37,21 @@ const {
   getAdminInstructorsListController,
   getAdminInstructorDetailsController,
   getAdminInstructorReviewsController,
-  updateInstructorStatusController
+  updateInstructorStatusController,
+  getAdminDashboardOverviewController
 } = require("./user.controller");
 const { updateProfile, userDetailsByID } = require('../Auth/auth.controller');
+const { getBankAccount, saveBankAccount, deleteBankAccount } = require('../Earnings/earnings.controller');
 const { authOrOnboarding, auth: authUser } = require('../../middlewares/auth');
 
 ensureUploadFolderExists(UPLOADS_FOLDER_USERS);
+
+// Bank Account (Figma Node 40012508:6741)
+router.get('/bank-account', authUser(['user', 'instructor', 'admin']), getBankAccount);
+router.post('/bank-account', authUser(['user', 'instructor', 'admin']), saveBankAccount);
+router.put('/bank-account', authUser(['user', 'instructor', 'admin']), saveBankAccount);
+router.patch('/bank-account', authUser(['user', 'instructor', 'admin']), saveBankAccount);
+router.delete('/bank-account', authUser(['user', 'instructor', 'admin']), deleteBankAccount);
 
 // User Profile Get & Update (supports /user/profile, /user/update-profile, /user/edit-profile)
 router.get(['/my-profile', '/profile'], authUser(['user', 'instructor', 'admin']), userDetailsByID);
@@ -82,6 +91,10 @@ router.get("/instructor-home", tokenCheck, getInstructorHomeController);
 
 router.patch("/location", auth(['user', 'instructor', 'admin']), updateUserLocationController);
 router.patch("/update-location", auth(['user', 'instructor', 'admin']), updateUserLocationController);
+
+// ==================== Admin Dashboard Overview (Figma Node 40012554:15436) ====================
+router.get("/admin/overview", tokenCheck, getAdminDashboardOverviewController);
+router.get("/admin/dashboard", tokenCheck, getAdminDashboardOverviewController);
 
 // ==================== Admin Clients Management & Drawers (Figma 40012554:16625, 40012525:10033, 40012525:10665) ====================
 router.get("/admin/clients", tokenCheck, getAdminClientsListController);

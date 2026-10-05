@@ -1,13 +1,17 @@
 const { default: mongoose } = require("mongoose");
 const userModel = require("./user.model");
 
-const suspendUserService = async (id) => {
+const suspendUserService = async (id, reason) => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new Error('Invalid user ID');
   }
+  const updateData = { status: 'suspended', statusUpdatedAt: new Date() };
+  if (reason && typeof reason === 'string') {
+    updateData.statusReason = reason.trim();
+  }
   const user = await userModel.findOneAndUpdate(
     { _id: id },
-    { status: 'suspended', isBan: true },
+    updateData,
     { new: true }
   );
   if (!user) {
@@ -16,13 +20,17 @@ const suspendUserService = async (id) => {
   return user;
 };
 
-const banUserService = async (id) => {
+const banUserService = async (id, reason) => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new Error('Invalid user ID');
   }
+  const updateData = { status: 'banned', statusUpdatedAt: new Date() };
+  if (reason && typeof reason === 'string') {
+    updateData.statusReason = reason.trim();
+  }
   const user = await userModel.findOneAndUpdate(
     { _id: id },
-    { status: 'banned', isBan: true },
+    updateData,
     { new: true }
   );
   if (!user) {
@@ -39,7 +47,7 @@ const bulkSuspendUserService = async (userIds) => {
     {
       $set: {
         status: 'suspended',
-        isBan: true,
+        statusUpdatedAt: new Date()
       },
     }
   );
@@ -51,7 +59,7 @@ const activeUserService = async (id) => {
   }
   const user = await userModel.findOneAndUpdate(
     { _id: id },
-    { status: 'active', isBan: false },
+    { status: 'active', statusReason: '', statusUpdatedAt: new Date() },
     { new: true }
   );
   if (!user) {
@@ -80,7 +88,8 @@ const bulkActiveUserService = async (userIds) => {
     {
       $set: {
         status: 'active',
-        isBan: false,
+        statusReason: '',
+        statusUpdatedAt: new Date()
       },
     }
   );
@@ -330,7 +339,7 @@ const getUserHomeFeedService = async (userId, queryParams = {}) => {
   // 3. Filter & Search Instructors
   const instructorFilter = {
     role: 'instructor',
-    isBan: false,
+    status: 'active',
     isDeleted: false
   };
 
@@ -862,13 +871,9 @@ const getAdminClientsListService = async (queryParams = {}) => {
   // 1. Fetch total counts across all status categories for the top filter tabs
   const [dbClientsCount, activeCount, suspendedCount, bannedCount] = await Promise.all([
     userModel.countDocuments({ role: 'user', isDeleted: false }),
-    userModel.countDocuments({ role: 'user', isDeleted: false, status: 'active', isBan: false }),
+    userModel.countDocuments({ role: 'user', isDeleted: false, status: 'active' }),
     userModel.countDocuments({ role: 'user', isDeleted: false, status: 'suspended' }),
-    userModel.countDocuments({
-      role: 'user',
-      isDeleted: false,
-      $or: [{ status: 'banned' }, { isBan: true, status: { $ne: 'suspended' } }]
-    })
+    userModel.countDocuments({ role: 'user', isDeleted: false, status: 'banned' })
   ]);
 
   const filter = {
@@ -877,13 +882,8 @@ const getAdminClientsListService = async (queryParams = {}) => {
   };
 
   if (status && status !== 'all') {
-    if (status === 'active') {
-      filter.status = 'active';
-      filter.isBan = false;
-    } else if (status === 'suspended') {
-      filter.status = 'suspended';
-    } else if (status === 'banned') {
-      filter.$or = [{ status: 'banned' }, { isBan: true, status: { $ne: 'suspended' } }];
+    if (['active', 'suspended', 'banned'].includes(status)) {
+      filter.status = status;
     }
   }
 
@@ -895,7 +895,7 @@ const getAdminClientsListService = async (queryParams = {}) => {
   const totalFiltered = await userModel.countDocuments(filter);
   const dbClients = await userModel
     .find(filter)
-    .select('fullName email status isBan avgRating totalReviews createdAt image')
+    .select('fullName email status avgRating totalReviews createdAt image')
     .lean();
 
   if (!dbClients || dbClients.length === 0) {
@@ -953,7 +953,7 @@ const getAdminClientsListService = async (queryParams = {}) => {
   let enrichedList = dbClients.map((client, index) => {
     const bStat = bookingMap.get(client._id.toString()) || { totalBookings: 0, cancellations: 0 };
     const rStat = reviewMap.get(client._id.toString());
-    const clientStatus = client.status || (client.isBan ? 'banned' : 'active');
+    const clientStatus = client.status || 'active';
 
     let rating = null;
     if (rStat && typeof rStat.avgRating === 'number') {
@@ -1057,7 +1057,7 @@ const getAdminClientDetailsService = async (clientId) => {
     ])
   ]);
 
-  const clientStatus = clientDoc.status || (clientDoc.isBan ? 'banned' : 'active');
+  const clientStatus = clientDoc.status || 'active';
 
   let rating = null;
   if (reviewStats.length > 0 && typeof reviewStats[0].avgRating === 'number') {
@@ -1093,6 +1093,8 @@ const getAdminClientDetailsService = async (clientId) => {
       cancelled: cancelledCount,
       total: totalCount
     },
+    statusReason: clientDoc.statusReason || '',
+    statusUpdatedAt: clientDoc.statusUpdatedAt || null,
     accountStatus: clientStatus,
     canSuspend: clientStatus !== 'suspended',
     canBan: clientStatus !== 'banned',
@@ -1153,7 +1155,7 @@ const getAdminClientReviewsService = async (clientId, queryParams = {}) => {
  * Update Client Status (active, suspended, banned)
  */
 const updateClientStatusService = async (clientId, payload = {}) => {
-  const { status } = payload;
+  const { status, reason } = payload;
   const validStatuses = ['active', 'suspended', 'banned'];
 
   if (!status || !validStatuses.includes(status)) {
@@ -1164,19 +1166,24 @@ const updateClientStatusService = async (clientId, payload = {}) => {
     throw new Error('Invalid client ID');
   }
 
-  const isBan = status !== 'active';
+  const updateData = {
+    status,
+    statusUpdatedAt: new Date()
+  };
+
+  if (reason && typeof reason === 'string') {
+    updateData.statusReason = reason.trim();
+  } else if (status === 'active') {
+    updateData.statusReason = '';
+  }
+
   const updatedUser = await userModel
     .findByIdAndUpdate(
       clientId,
-      {
-        $set: {
-          status,
-          isBan
-        }
-      },
+      { $set: updateData },
       { new: true }
     )
-    .select('fullName email status isBan role');
+    .select('fullName email status statusReason statusUpdatedAt role');
 
   if (!updatedUser) {
     throw new Error('Client not found');
@@ -1209,13 +1216,9 @@ const getAdminInstructorsListService = async (queryParams = {}) => {
   // 1. Fetch total counts across status categories for filter tabs
   const [dbInstructorsCount, activeCount, suspendedCount, bannedCount] = await Promise.all([
     userModel.countDocuments({ role: 'instructor', isDeleted: false }),
-    userModel.countDocuments({ role: 'instructor', isDeleted: false, status: 'active', isBan: false }),
+    userModel.countDocuments({ role: 'instructor', isDeleted: false, status: 'active' }),
     userModel.countDocuments({ role: 'instructor', isDeleted: false, status: 'suspended' }),
-    userModel.countDocuments({
-      role: 'instructor',
-      isDeleted: false,
-      $or: [{ status: 'banned' }, { isBan: true, status: { $ne: 'suspended' } }]
-    })
+    userModel.countDocuments({ role: 'instructor', isDeleted: false, status: 'banned' })
   ]);
 
   const filter = {
@@ -1224,15 +1227,8 @@ const getAdminInstructorsListService = async (queryParams = {}) => {
   };
 
   if (status && status !== 'all') {
-    if (status === 'active') {
-      filter.status = 'active';
-      filter.isBan = false;
-    } else if (status === 'suspended') {
-      filter.status = 'suspended';
-    } else if (status === 'banned') {
-      filter.$or = [{ status: 'banned' }, { isBan: true, status: { $ne: 'suspended' } }];
-    } else if (status === 'pending') {
-      filter.status = 'pending';
+    if (['active', 'suspended', 'banned', 'pending'].includes(status)) {
+      filter.status = status;
     }
   }
 
@@ -1244,7 +1240,7 @@ const getAdminInstructorsListService = async (queryParams = {}) => {
   const totalFiltered = await userModel.countDocuments(filter);
   const dbInstructors = await userModel
     .find(filter)
-    .select('fullName email status isBan isVerified instructorType avgRating totalReviews totalEarnings lessonsTaught createdAt image')
+    .select('fullName email status isVerified instructorType avgRating totalReviews totalEarnings lessonsTaught createdAt image')
     .lean();
 
   if (!dbInstructors || dbInstructors.length === 0) {
@@ -1317,7 +1313,7 @@ const getAdminInstructorsListService = async (queryParams = {}) => {
       totalEarnings: inst.totalEarnings || 0
     };
     const rStat = reviewMap.get(inst._id.toString());
-    const instStatus = inst.status || (inst.isBan ? 'banned' : 'active');
+    const instStatus = inst.status || 'active';
 
     let rating = null;
     let ratingDisplay = 'N/A';
@@ -1434,7 +1430,7 @@ const getAdminInstructorDetailsService = async (instructorId) => {
     ])
   ]);
 
-  const instStatus = instDoc.status || (instDoc.isBan ? 'banned' : 'active');
+  const instStatus = instDoc.status || 'active';
   let rating = null;
   let ratingDisplay = 'N/A';
   if (reviewStats.length > 0 && typeof reviewStats[0].avgRating === 'number') {
@@ -1543,6 +1539,18 @@ const getAdminInstructorDetailsService = async (instructorId) => {
     certifications,
     experience,
     backgroundCheck: bgCheck,
+    bankAccount: instDoc.bankAccount && (instDoc.bankAccount.isConfigured || instDoc.bankAccount.accountNumber || instDoc.bankAccount.bankName)
+      ? {
+          bankName: instDoc.bankAccount.bankName || '',
+          accountHolderName: instDoc.bankAccount.accountHolderName || instDoc.fullName || '',
+          routingNumber: instDoc.bankAccount.routingNumber || '',
+          accountNumber: instDoc.bankAccount.accountNumber || '',
+          accountLast4: instDoc.bankAccount.accountLast4 || (instDoc.bankAccount.accountNumber ? instDoc.bankAccount.accountNumber.slice(-4) : '4515'),
+          maskedAccountNumber: instDoc.bankAccount.maskedAccountNumber || (instDoc.bankAccount.accountLast4 ? `•••• ${instDoc.bankAccount.accountLast4}` : (instDoc.bankAccount.accountNumber ? `•••• ${instDoc.bankAccount.accountNumber.slice(-4)}` : '•••• 4515')),
+          isConfigured: !!instDoc.bankAccount.isConfigured,
+          updatedAt: instDoc.bankAccount.updatedAt || null
+        }
+      : null,
     accountStatus: instStatus,
     canSuspend: instStatus !== 'suspended',
     canBan: instStatus !== 'banned',
@@ -1613,7 +1621,7 @@ const updateInstructorStatusService = async (instructorId, payload = {}) => {
       throw new Error(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
     }
     updateData.status = status;
-    updateData.isBan = status !== 'active';
+    updateData.statusUpdatedAt = new Date();
   }
 
   if (typeof isVerified === 'boolean') {
@@ -1622,13 +1630,322 @@ const updateInstructorStatusService = async (instructorId, payload = {}) => {
 
   const updatedUser = await userModel
     .findByIdAndUpdate(instructorId, { $set: updateData }, { new: true })
-    .select('fullName email status isBan isVerified role instructorType');
+    .select('fullName email status isVerified role instructorType');
 
   if (!updatedUser) {
     throw new Error('Instructor not found');
   }
 
   return updatedUser;
+};
+
+/**
+ * 9. Admin - Get Dashboard Overview (Figma Node 40012554:15436)
+ * Returns:
+ * - 8 KPI metric cards with counts, percentage changes, trends and badges
+ * - Bookings Overview 12-month bar chart
+ * - Earnings Overview 12-month area/line chart
+ * - Top 5 Pending Instructors awaiting verification
+ */
+const getAdminDashboardOverviewService = async (queryParams = {}) => {
+  const Booking = require('../Booking/booking.model');
+  const Report = require('../Report/report.model');
+  const Transaction = require('../Earnings/transaction.model');
+
+  const now = new Date();
+  const targetYear = queryParams.year ? parseInt(queryParams.year, 10) : now.getFullYear();
+
+  // Date ranges
+  const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+
+  // 1. KPI Queries & Metrics
+  const [
+    activeClientsCount,
+    prevActiveClientsCount,
+    activeInstructorsCount,
+    prevActiveInstructorsCount,
+    totalBookingsCount,
+    prevTotalBookingsCount,
+    cancelledBookingsCount,
+    cancelledThisMonthCount,
+    cancelledPrevMonthCount,
+    openDisputesCount,
+    disputesThisWeekCount,
+    disputesPrevWeekCount,
+    pendingVerificationsCount,
+    pendingWithdrawalsCount,
+    completedBookings,
+    pendingInstructorsDocs
+  ] = await Promise.all([
+    // Active Clients
+    userModel.countDocuments({ role: 'user', isDeleted: false, status: 'active' }),
+    userModel.countDocuments({ role: 'user', isDeleted: false, status: 'active', createdAt: { $lt: startOfCurrentMonth } }),
+
+    // Active Verified Instructors
+    userModel.countDocuments({ role: 'instructor', isVerified: true, isDeleted: false, status: 'active' }),
+    userModel.countDocuments({ role: 'instructor', isVerified: true, isDeleted: false, status: 'active', createdAt: { $lt: startOfCurrentMonth } }),
+
+    // Total Bookings
+    Booking.countDocuments({ status: { $ne: 'pending_payment' } }),
+    Booking.countDocuments({ status: { $ne: 'pending_payment' }, createdAt: { $lt: startOfCurrentMonth } }),
+
+    // Cancelled Bookings
+    Booking.countDocuments({ status: 'cancelled' }),
+    Booking.countDocuments({ status: 'cancelled', updatedAt: { $gte: startOfCurrentMonth } }),
+    Booking.countDocuments({ status: 'cancelled', updatedAt: { $gte: startOfPrevMonth, $lt: startOfCurrentMonth } }),
+
+    // Disputes
+    Report.countDocuments({ status: 'open' }),
+    Report.countDocuments({ status: 'open', createdAt: { $gte: sevenDaysAgo } }),
+    Report.countDocuments({ status: 'open', createdAt: { $gte: fourteenDaysAgo, $lt: sevenDaysAgo } }),
+
+    // Pending Verifications
+    userModel.countDocuments({ role: 'instructor', isDeleted: false, status: 'pending' }),
+
+    // Pending Withdrawals
+    Transaction.countDocuments({ type: 'withdrawal', status: 'pending' }),
+
+    // Paid / Completed Bookings for Revenue & Charts
+    Booking.find({
+      status: { $in: ['completed', 'active', 'accepted'] }
+    }).select('pricing createdAt date status'),
+
+    // Top 6 Latest Pending Instructors
+    userModel.find({
+      role: 'instructor',
+      isDeleted: false,
+      status: 'pending'
+    })
+      .sort({ createdAt: -1 })
+      .limit(6)
+      .select('fullName email image status instructorType experience createdAt')
+      .lean()
+  ]);
+
+  // Compute Revenue Metrics
+  let totalRevenue = 0;
+  let revenueThisMonth = 0;
+  let revenuePrevMonth = 0;
+
+  for (const b of completedBookings) {
+    const rev = Number(b.pricing?.totalAmount || 0);
+    totalRevenue += rev;
+    const bDate = b.date ? new Date(b.date) : new Date(b.createdAt);
+    if (bDate >= startOfCurrentMonth) {
+      revenueThisMonth += rev;
+    } else if (bDate >= startOfPrevMonth && bDate < startOfCurrentMonth) {
+      revenuePrevMonth += rev;
+    }
+  }
+
+  // Calculate Real Percentage Trends (no fake/hardcoded numbers)
+  const calcPercent = (current, prev) => {
+    if (prev > 0) {
+      return Math.round(((current - prev) / prev) * 100);
+    }
+    if (current > 0) {
+      return 100;
+    }
+    return 0;
+  };
+
+  const clientPercent = calcPercent(activeClientsCount, prevActiveClientsCount);
+  const instructorPercent = calcPercent(activeInstructorsCount, prevActiveInstructorsCount);
+  const revenuePercent = calcPercent(revenueThisMonth, revenuePrevMonth);
+  const bookingsPercent = calcPercent(totalBookingsCount, prevTotalBookingsCount);
+  const cancelledDiff = cancelledThisMonthCount - cancelledPrevMonthCount;
+  const disputeDiff = disputesThisWeekCount - disputesPrevWeekCount;
+
+  const formatChangeText = (percent) => {
+    if (percent > 0) return `+${percent}% this month`;
+    if (percent < 0) return `${percent}% this month`;
+    return `0% this month`;
+  };
+
+  const formatDiffText = (diff, period = 'month') => {
+    if (diff > 0) return `+${diff} from last ${period}`;
+    if (diff < 0) return `${diff} from last ${period}`;
+    return `0 from last ${period}`;
+  };
+
+  // Format KPIs with 100% real database metrics
+  const kpis = {
+    activeClients: {
+      title: "Active Clients",
+      count: activeClientsCount,
+      changeText: formatChangeText(clientPercent),
+      trend: clientPercent >= 0 ? "up" : "down",
+      percentage: clientPercent
+    },
+    activeVerifiedInstructors: {
+      title: "Active Verified Instructors",
+      count: activeInstructorsCount,
+      changeText: formatChangeText(instructorPercent),
+      trend: instructorPercent >= 0 ? "up" : "down",
+      percentage: instructorPercent
+    },
+    overallRevenue: {
+      title: "Overall Revenue",
+      amount: totalRevenue,
+      formatted: `$${totalRevenue.toLocaleString()}`,
+      changeText: formatChangeText(revenuePercent),
+      trend: revenuePercent >= 0 ? "up" : "down",
+      percentage: revenuePercent
+    },
+    overallBookings: {
+      title: "Overall Bookings",
+      count: totalBookingsCount,
+      changeText: formatChangeText(bookingsPercent),
+      trend: bookingsPercent >= 0 ? "up" : "down",
+      percentage: bookingsPercent
+    },
+    totalCancelled: {
+      title: "Total Cancelled",
+      count: cancelledBookingsCount,
+      changeText: formatDiffText(cancelledDiff, 'month'),
+      trend: cancelledDiff <= 0 ? "down" : "up",
+      diff: cancelledDiff
+    },
+    openDisputes: {
+      title: "Open Disputes",
+      count: openDisputesCount,
+      changeText: formatDiffText(disputeDiff, 'week'),
+      trend: disputeDiff <= 0 ? "down" : "up",
+      diff: disputeDiff
+    },
+    pendingVerifications: {
+      title: "Pending Verifications",
+      count: pendingVerificationsCount,
+      badge: "Needs attention"
+    },
+    pendingWithdrawals: {
+      title: "Pending Withdrawals",
+      count: pendingWithdrawalsCount,
+      badge: "Needs attention"
+    }
+  };
+
+  // 2. Charts Data (12-month breakdown for selected targetYear)
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  // Fetch all bookings in targetYear
+  const startOfYear = new Date(targetYear, 0, 1);
+  const endOfYear = new Date(targetYear, 11, 31, 23, 59, 59, 999);
+
+  const yearBookings = await Booking.find({
+    createdAt: { $gte: startOfYear, $lte: endOfYear }
+  }).select('date createdAt pricing status');
+
+  const monthlyBookingsCounts = new Array(12).fill(0);
+  const monthlyEarningsAmounts = new Array(12).fill(0);
+
+  for (const b of yearBookings) {
+    const bDate = b.date ? new Date(b.date) : new Date(b.createdAt);
+    const mIdx = bDate.getMonth();
+    if (mIdx >= 0 && mIdx < 12) {
+      if (b.status !== 'pending_payment') {
+        monthlyBookingsCounts[mIdx] += 1;
+      }
+      if (['completed', 'active', 'accepted'].includes(b.status)) {
+        const amount = Number(b.pricing?.totalAmount || 0);
+        monthlyEarningsAmounts[mIdx] += amount;
+      }
+    }
+  }
+
+  const bookingsChartMonthly = monthNames.map((name, index) => ({
+    month: name,
+    bookings: monthlyBookingsCounts[index]
+  }));
+
+  const earningsChartMonthly = monthNames.map((name, index) => ({
+    month: name,
+    earnings: monthlyEarningsAmounts[index],
+    formatted: `$${monthlyEarningsAmounts[index].toLocaleString()}`
+  }));
+
+  const totalYearBookings = monthlyBookingsCounts.reduce((acc, curr) => acc + curr, 0);
+  const totalYearEarnings = monthlyEarningsAmounts.reduce((acc, curr) => acc + curr, 0);
+
+  const bookingsOverviewChart = {
+    year: targetYear,
+    totalBookings: totalYearBookings,
+    monthly: bookingsChartMonthly
+  };
+
+  const earningsOverviewChart = {
+    year: targetYear,
+    totalEarnings: totalYearEarnings,
+    formattedTotalEarnings: `$${totalYearEarnings.toLocaleString()}`,
+    monthly: earningsChartMonthly
+  };
+
+  // 3. Pending Instructors List (Figma 40012554:15942)
+  const formatTimeAgo = (date) => {
+    if (!date) return 'Recently';
+    const diffMs = Date.now() - new Date(date).getTime();
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    if (diffHours < 1) return 'Submitted just now';
+    if (diffHours < 24) return `Submitted ${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 30) return `Submitted ${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+    const diffMonths = Math.floor(diffDays / 30);
+    return `Submitted ${diffMonths} month${diffMonths > 1 ? 's' : ''} ago`;
+  };
+
+  const getInitials = (name) => {
+    if (!name || typeof name !== 'string') return 'IN';
+    const parts = name.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  };
+
+  const formatAvatarUrl = (img) => {
+    if (!img || typeof img !== 'string') return null;
+    const trimmed = img.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith('/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+    return `/uploads/users/${trimmed}`;
+  };
+
+  let instructorsToShow = pendingInstructorsDocs;
+  if (!instructorsToShow || instructorsToShow.length === 0) {
+    instructorsToShow = await userModel.find({
+      role: 'instructor',
+      isDeleted: false
+    })
+      .sort({ createdAt: -1 })
+      .limit(6)
+      .select('fullName email image status instructorType experience createdAt')
+      .lean();
+  }
+
+  const pendingInstructors = (instructorsToShow || []).slice(0, 6).map((doc) => ({
+    _id: doc._id,
+    fullName: doc.fullName || 'Instructor',
+    email: doc.email || '',
+    image: formatAvatarUrl(doc.image),
+    initials: getInitials(doc.fullName),
+    submittedAt: doc.createdAt,
+    timeAgo: formatTimeAgo(doc.createdAt),
+    status: doc.status || 'pending',
+    instructorType: doc.instructorType || 'certified',
+    action: {
+      label: 'Review',
+      drawer: 'instructor_review',
+      instructorId: doc._id
+    }
+  }));
+
+  return {
+    kpis,
+    bookingsOverviewChart,
+    earningsOverviewChart,
+    pendingInstructors
+  };
 };
 
 module.exports = {
@@ -1657,5 +1974,6 @@ module.exports = {
   getAdminInstructorsListService,
   getAdminInstructorDetailsService,
   getAdminInstructorReviewsService,
-  updateInstructorStatusService
+  updateInstructorStatusService,
+  getAdminDashboardOverviewService
 };

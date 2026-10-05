@@ -29,10 +29,13 @@ const socialLoginWithAppleService = async (payload) => {
   });
 
   if (user) {
-    if (user.isBan) {
+    if (user.status === 'banned' || user.status === 'suspended') {
+      const msg = user.status === 'suspended'
+        ? (user.statusReason ? `Your account has been suspended: ${user.statusReason}` : 'Your account has been suspended. Please contact support.')
+        : (user.statusReason ? `Your account has been banned: ${user.statusReason}` : 'Your account has been banned. Please contact support.');
       throw new ApiError(
         status.FORBIDDEN,
-        "This account is blocked"
+        msg
       );
     }
     return user;
@@ -89,10 +92,13 @@ const socialLoginWithGoogleService = async (payload) => {
   });
 
   if (user) {
-    if (user.isBan) {
+    if (user.status === 'banned' || user.status === 'suspended') {
+      const msg = user.status === 'suspended'
+        ? (user.statusReason ? `Your account has been suspended: ${user.statusReason}` : 'Your account has been suspended. Please contact support.')
+        : (user.statusReason ? `Your account has been banned: ${user.statusReason}` : 'Your account has been banned. Please contact support.');
       throw new ApiError(
         status.FORBIDDEN,
-        "This account is blocked"
+        msg
       );
     }
     return user;
@@ -201,8 +207,11 @@ const login = async (identifier, receiverType, inputPassword) => {
     throw new ApiError(status.NOT_FOUND, "User account is deleted");
   }
 
-  if (user.isBan) {
-    throw new ApiError(status.FORBIDDEN, "User account is suspended/banned");
+  if (user.status === 'banned' || user.status === 'suspended') {
+    const msg = user.status === 'suspended'
+      ? (user.statusReason ? `Your account has been suspended: ${user.statusReason}` : 'Your account has been suspended. Please contact support.')
+      : (user.statusReason ? `Your account has been banned: ${user.statusReason}` : 'Your account has been banned. Please contact support.');
+    throw new ApiError(status.FORBIDDEN, msg);
   }
 
   const isMatch = await bcrypt.compare(
@@ -253,10 +262,10 @@ const changePasswordService = async (userId, oldPassword, newPassword) => {
     );
   }
 
-  if (user.isBan) {
+  if (user.status === 'banned' || user.status === 'suspended') {
     throw new ApiError(
       status.FORBIDDEN,
-      "User is banned"
+      "User is suspended or banned"
     );
   }
 
@@ -719,7 +728,7 @@ const profileByIdService = async (userId) => {
 };
 
 const allUserService = async (options) => {
-  const { page = 1, limit = 10, search, isBan, role } = options;
+  const { page = 1, limit = 10, search, status: userStatus, isBan, role } = options;
   const skip = (page - 1) * limit;
 
   const searchMatch = search
@@ -733,12 +742,18 @@ const allUserService = async (options) => {
     }
     : {};
 
-  const banMatch = isBan !== undefined ? { isBan: isBan === "true" } : {};
+  let statusMatch = {};
+  if (userStatus) {
+    statusMatch = { status: userStatus };
+  } else if (isBan !== undefined) {
+    statusMatch = isBan === "true" ? { status: { $in: ['banned', 'suspended'] } } : { status: 'active' };
+  }
+
   const roleMatch = role ? { role: { $in: role.split(",") } } : {};
 
   const matchQuery = {
     isDeleted: false,
-    ...banMatch,
+    ...statusMatch,
     ...roleMatch,
     ...searchMatch
   };

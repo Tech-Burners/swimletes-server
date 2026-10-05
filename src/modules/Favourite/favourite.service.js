@@ -240,7 +240,7 @@ const myFavouriteService = async (userId, queryParams = {}) => {
   // 4. Query Instructors
   const instructorFilter = {
     _id: { $in: instructorIds },
-    isBan: { $ne: true },
+    status: 'active',
     isDeleted: { $ne: true }
   };
 

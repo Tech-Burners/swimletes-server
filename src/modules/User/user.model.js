@@ -31,7 +31,6 @@ const userSchema = new mongoose.Schema({
   },
   role: { type: String, enum: ['user', 'instructor', 'admin'], default: 'user' },
   status: { type: String, enum: ['active', 'suspended', 'banned', 'pending'], default: 'active' },
-  isBan: { type: Boolean, default: false },
   isDeleted: { type: Boolean, default: false },
   password: { type: String, required: false },
   googleId: { type: String },
@@ -136,6 +135,13 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  statusReason: {
+    type: String,
+    default: '',
+  },
+  statusUpdatedAt: {
+    type: Date
+  },
   lessonsTaught: {
     type: Number,
     default: 0,
@@ -155,13 +161,27 @@ const userSchema = new mongoose.Schema({
       default: [0, 0] // [longitude, latitude]
     }
   },
+  bankAccount: {
+    bankName: { type: String, default: '' },
+    accountHolderName: { type: String, default: '' },
+    routingNumber: { type: String, default: '' },
+    accountNumber: { type: String, default: '' },
+    accountLast4: { type: String, default: '' },
+    maskedAccountNumber: { type: String, default: '' },
+    isConfigured: { type: Boolean, default: false },
+    updatedAt: { type: Date }
+  },
 },
   {
     timestamps: true,
-    toJSON: { getters: true },
-    toObject: { getters: true }
+    toJSON: { getters: true, virtuals: true },
+    toObject: { getters: true, virtuals: true }
   }
 );
+
+userSchema.virtual('isBan').get(function () {
+  return this.status === 'banned' || this.status === 'suspended';
+});
 
 userSchema.pre("save", async function (next) {
   if (this.isModified("password") && this.password) {

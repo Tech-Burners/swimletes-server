@@ -301,8 +301,26 @@ const requestWithdrawalService = async (instructorId, data = {}) => {
     );
   }
 
-  const bankName = data.bankName || 'Chase';
-  const accountLast4 = data.accountLast4 || '8821';
+  const user = await User.findById(instructorId).select('bankAccount fullName');
+  const savedBank = user?.bankAccount || {};
+
+  const hasSavedBank = Boolean(savedBank.isConfigured || (savedBank.bankName && (savedBank.accountNumber || savedBank.accountLast4)));
+  const hasProvidedBank = Boolean(data.bankName && (data.accountNumber || data.accountLast4));
+
+  if (!hasSavedBank && !hasProvidedBank) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      'Please configure your bank account details before requesting a payout'
+    );
+  }
+
+  const bankName = (data.bankName || savedBank.bankName || 'Chase Bank').trim();
+  const accountHolderName = (data.accountHolderName || savedBank.accountHolderName || user?.fullName || 'Instructor').trim();
+  const routingNumber = (data.routingNumber || savedBank.routingNumber || '').trim();
+  const rawAccountNumber = (data.accountNumber || savedBank.accountNumber || '').trim();
+  const accountLast4 = (data.accountLast4 || savedBank.accountLast4 || (rawAccountNumber ? rawAccountNumber.slice(-4) : '4515')).trim();
+  const maskedAccountNumber = (savedBank.maskedAccountNumber || (accountLast4 ? `•••• ${accountLast4}` : (rawAccountNumber ? `•••• ${rawAccountNumber.slice(-4)}` : '•••• 4515'))).trim();
+  const note = data.note || data.description || 'Monthly payout request.';
   const now = new Date();
   const dateStr = `${monthsShort[now.getMonth()]} ${now.getDate()}`;
 
@@ -316,9 +334,15 @@ const requestWithdrawalService = async (instructorId, data = {}) => {
     isPositive: false,
     title: 'Withdrawal',
     subtitle: `${bankName} ·· ${accountLast4} · ${dateStr}`,
+    description: note,
+    note: note,
     bankDetails: {
       bankName,
-      accountLast4
+      accountHolderName,
+      routingNumber,
+      accountNumber: rawAccountNumber,
+      accountLast4,
+      maskedAccountNumber
     },
     availableBalanceAtRequest: available,
     date: now
@@ -328,8 +352,15 @@ const requestWithdrawalService = async (instructorId, data = {}) => {
     _id: transaction._id,
     transactionId: transaction.transactionId,
     amount: -amount,
-    bankName,
-    accountLast4,
+    bankDetails: {
+      bankName,
+      accountHolderName,
+      routingNumber,
+      accountNumber: rawAccountNumber,
+      accountLast4,
+      maskedAccountNumber
+    },
+    note,
     status: transaction.status,
     availableBalance: available,
     date: transaction.date
@@ -388,7 +419,7 @@ const getAdminPendingWithdrawalsService = async (queryParams = {}) => {
   }
 
   let list = await Transaction.find(query)
-    .populate('instructor', 'fullName email image')
+    .populate('instructor', 'fullName email image number phone bankAccount')
     .sort(sortCriteria);
 
   if (search && search.trim()) {
@@ -398,6 +429,8 @@ const getAdminPendingWithdrawalsService = async (queryParams = {}) => {
         t.instructor?.fullName?.toLowerCase().includes(s) ||
         t.instructor?.email?.toLowerCase().includes(s) ||
         t.bankDetails?.bankName?.toLowerCase().includes(s) ||
+        t.bankDetails?.accountNumber?.includes(s) ||
+        t.bankDetails?.routingNumber?.includes(s) ||
         t.transactionId?.toLowerCase().includes(s)
     );
   }
@@ -409,6 +442,14 @@ const getAdminPendingWithdrawalsService = async (queryParams = {}) => {
     const instructorName = t.instructor?.fullName || 'Instructor';
     const amountVal = Math.abs(t.grossAmount || t.netAmount || 0);
     const availableVal = t.availableBalanceAtRequest || amountVal;
+    const instBank = t.instructor?.bankAccount || {};
+
+    const bankName = t.bankDetails?.bankName || instBank.bankName || 'Chase Bank';
+    const accountHolderName = t.bankDetails?.accountHolderName || instBank.accountHolderName || instructorName;
+    const routingNumber = t.bankDetails?.routingNumber || instBank.routingNumber || '';
+    const rawAccountNumber = t.bankDetails?.accountNumber || instBank.accountNumber || '';
+    const accountLast4 = t.bankDetails?.accountLast4 || instBank.accountLast4 || (rawAccountNumber ? rawAccountNumber.slice(-4) : '4515');
+    const maskedAccountNumber = t.bankDetails?.maskedAccountNumber || instBank.maskedAccountNumber || (accountLast4 ? `•••• ${accountLast4}` : (rawAccountNumber ? `•••• ${rawAccountNumber.slice(-4)}` : '•••• 4515'));
 
     return {
       _id: t._id,
@@ -416,10 +457,20 @@ const getAdminPendingWithdrawalsService = async (queryParams = {}) => {
       user: {
         _id: t.instructor?._id,
         name: instructorName,
+        email: t.instructor?.email || '',
+        phone: t.instructor?.number || t.instructor?.phone || '',
         avatar: t.instructor?.image || null,
         initials: getInitials(instructorName)
       },
-      bankName: t.bankDetails?.bankName ? `${t.bankDetails.bankName} Bank` : 'Chase Bank',
+      bankName: bankName.endsWith('Bank') ? bankName : `${bankName} Bank`,
+      bankDetails: {
+        bankName: bankName.endsWith('Bank') ? bankName : `${bankName} Bank`,
+        accountHolderName,
+        routingNumber,
+        accountNumber: rawAccountNumber,
+        accountLast4,
+        maskedAccountNumber
+      },
       requestedAmount: amountVal,
       availableBalance: availableVal,
       requestDate: t.date,
@@ -464,7 +515,7 @@ const getAdminWithdrawalHistoryService = async (queryParams = {}) => {
   }
 
   let list = await Transaction.find(query)
-    .populate('instructor', 'fullName email image')
+    .populate('instructor', 'fullName email image number phone bankAccount')
     .sort(sortCriteria);
 
   if (search && search.trim()) {
@@ -474,6 +525,8 @@ const getAdminWithdrawalHistoryService = async (queryParams = {}) => {
         t.instructor?.fullName?.toLowerCase().includes(s) ||
         t.instructor?.email?.toLowerCase().includes(s) ||
         t.bankDetails?.bankName?.toLowerCase().includes(s) ||
+        t.bankDetails?.accountNumber?.includes(s) ||
+        t.bankDetails?.routingNumber?.includes(s) ||
         t.transactionId?.toLowerCase().includes(s)
     );
   }
@@ -486,6 +539,14 @@ const getAdminWithdrawalHistoryService = async (queryParams = {}) => {
     const amountVal = Math.abs(t.grossAmount || t.netAmount || 0);
     const actionDateVal = t.actionDate || t.updatedAt || t.date;
     const isCompleted = t.status === 'completed';
+    const instBank = t.instructor?.bankAccount || {};
+
+    const bankName = t.bankDetails?.bankName || instBank.bankName || 'Chase Bank';
+    const accountHolderName = t.bankDetails?.accountHolderName || instBank.accountHolderName || instructorName;
+    const routingNumber = t.bankDetails?.routingNumber || instBank.routingNumber || '';
+    const rawAccountNumber = t.bankDetails?.accountNumber || instBank.accountNumber || '';
+    const accountLast4 = t.bankDetails?.accountLast4 || instBank.accountLast4 || (rawAccountNumber ? rawAccountNumber.slice(-4) : '4515');
+    const maskedAccountNumber = t.bankDetails?.maskedAccountNumber || instBank.maskedAccountNumber || (accountLast4 ? `•••• ${accountLast4}` : (rawAccountNumber ? `•••• ${rawAccountNumber.slice(-4)}` : '•••• 4515'));
 
     return {
       _id: t._id,
@@ -493,10 +554,20 @@ const getAdminWithdrawalHistoryService = async (queryParams = {}) => {
       user: {
         _id: t.instructor?._id,
         name: instructorName,
+        email: t.instructor?.email || '',
+        phone: t.instructor?.number || t.instructor?.phone || '',
         avatar: t.instructor?.image || null,
         initials: getInitials(instructorName)
       },
-      bankName: t.bankDetails?.bankName ? `${t.bankDetails.bankName} Bank` : 'Chase Bank',
+      bankName: bankName.endsWith('Bank') ? bankName : `${bankName} Bank`,
+      bankDetails: {
+        bankName: bankName.endsWith('Bank') ? bankName : `${bankName} Bank`,
+        accountHolderName,
+        routingNumber,
+        accountNumber: rawAccountNumber,
+        accountLast4,
+        maskedAccountNumber
+      },
       amount: amountVal,
       requestDate: t.date,
       requestDateFormatted: formatDateShort(t.date),
@@ -517,19 +588,65 @@ const getAdminWithdrawalHistoryService = async (queryParams = {}) => {
 };
 
 /**
- * 6. Admin - Get Withdrawal Details by ID
+ * 6. Admin - Get Withdrawal Details by ID (Figma Nodes 40012563:22209 & 40012563:24404)
  */
 const getAdminWithdrawalDetailsService = async (id) => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid Withdrawal ID');
   }
 
-  const withdrawal = await Transaction.findById(id).populate('instructor', 'fullName email image phone about');
+  const withdrawal = await Transaction.findById(id).populate('instructor', 'fullName email image number phone bankAccount');
   if (!withdrawal || withdrawal.type !== 'withdrawal') {
     throw new ApiError(httpStatus.NOT_FOUND, 'Withdrawal request not found');
   }
 
-  return withdrawal;
+  const inst = withdrawal.instructor || {};
+  const instructorName = inst.fullName || 'Instructor';
+  const savedBank = inst.bankAccount || {};
+
+  const bankName = withdrawal.bankDetails?.bankName || savedBank.bankName || 'Chase Bank';
+  const accountHolder = withdrawal.bankDetails?.accountHolderName || savedBank.accountHolderName || instructorName;
+  const routingNumber = withdrawal.bankDetails?.routingNumber || savedBank.routingNumber || '';
+  const rawAccountNumber = withdrawal.bankDetails?.accountNumber || savedBank.accountNumber || '';
+  const accountLast4 = withdrawal.bankDetails?.accountLast4 || savedBank.accountLast4 || (rawAccountNumber ? rawAccountNumber.slice(-4) : '4515');
+  const maskedAccountNumber = withdrawal.bankDetails?.maskedAccountNumber || savedBank.maskedAccountNumber || (accountLast4 ? `•••• ${accountLast4}` : (rawAccountNumber ? `•••• ${rawAccountNumber.slice(-4)}` : '•••• 4515'));
+
+  const requestedAmount = Math.abs(withdrawal.grossAmount || withdrawal.netAmount || 0);
+  const availableBalance = withdrawal.availableBalanceAtRequest || 0;
+
+  return {
+    _id: withdrawal._id,
+    transactionId: withdrawal.transactionId,
+    instructor: {
+      _id: inst._id,
+      name: instructorName,
+      email: inst.email || '',
+      phone: inst.number || inst.phone || '',
+      avatar: inst.image || null,
+      initials: getInitials(instructorName),
+      role: 'Instructor'
+    },
+    status: withdrawal.status === 'completed' ? 'Completed' : (withdrawal.status === 'rejected' ? 'Rejected' : 'Pending'),
+    requestedAmount,
+    requestedAmountFormatted: `$${requestedAmount.toFixed(0)}`,
+    availableBalance,
+    availableBalanceFormatted: `$${availableBalance.toFixed(0)}`,
+    requestDate: withdrawal.date,
+    requestDateRelative: formatRelativeTime(withdrawal.date),
+    requestDateFormatted: formatDateShort(withdrawal.date),
+    note: withdrawal.note || withdrawal.description || 'Monthly payout request.',
+    bankDetails: {
+      bankName: bankName.endsWith('Bank') ? bankName : `${bankName} Bank`,
+      accountHolderName: accountHolder,
+      routingNumber: routingNumber,
+      accountNumber: rawAccountNumber,
+      accountLast4: accountLast4,
+      maskedAccountNumber: maskedAccountNumber
+    },
+    actionDate: withdrawal.actionDate || null,
+    actionDateFormatted: withdrawal.actionDate ? formatDateShort(withdrawal.actionDate) : null,
+    rejectionReason: withdrawal.rejectionReason || ''
+  };
 };
 
 /**
@@ -806,6 +923,146 @@ const getAdminPlatformTransactionsService = async (queryParams = {}) => {
   };
 };
 
+/**
+ * 10. Get Saved Bank Account Details (Figma Node 40012508:6741)
+ */
+const getBankAccountService = async (userId) => {
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid User ID');
+  }
+
+  const user = await User.findById(userId).select('bankAccount fullName');
+  if (!user) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
+  }
+
+  const bank = user.bankAccount || {};
+  const isConfigured = Boolean(bank.isConfigured && bank.bankName && (bank.accountLast4 || bank.accountNumber));
+  const rawAccount = bank.accountNumber || '';
+  const last4 = bank.accountLast4 || (rawAccount ? rawAccount.slice(-4) : '');
+  const masked = bank.maskedAccountNumber || (last4 ? `•••• ${last4}` : (rawAccount ? `•••• ${rawAccount.slice(-4)}` : ''));
+
+  return {
+    hasBankAccount: isConfigured,
+    bankAccount: {
+      bankName: bank.bankName || '',
+      accountHolderName: bank.accountHolderName || user.fullName || '',
+      routingNumber: bank.routingNumber || '',
+      accountNumber: rawAccount,
+      accountLast4: last4,
+      maskedAccountNumber: masked,
+      isConfigured: isConfigured,
+      updatedAt: bank.updatedAt || null
+    }
+  };
+};
+
+/**
+ * 11. Save or Update Bank Account Details (Figma Node 40012508:6741)
+ */
+const saveBankAccountService = async (userId, data = {}) => {
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid User ID');
+  }
+
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
+  }
+
+  const { bankName, accountHolderName, routingNumber, accountNumber } = data;
+
+  if (!bankName || typeof bankName !== 'string' || !bankName.trim()) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Bank name is required');
+  }
+
+  if (!accountHolderName || typeof accountHolderName !== 'string' || !accountHolderName.trim()) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Account holder name is required');
+  }
+
+  if (!routingNumber || typeof routingNumber !== 'string' || !routingNumber.trim()) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Routing number is required');
+  }
+
+  const cleanRouting = routingNumber.trim().replace(/\D/g, '');
+  if (cleanRouting.length !== 9 && routingNumber.trim().length < 5) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Please provide a valid 9-digit routing number');
+  }
+
+  if (!accountNumber || typeof accountNumber !== 'string' || !accountNumber.trim()) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Account number is required');
+  }
+
+  const rawAccount = accountNumber.trim().replace(/\s+/g, '');
+  const cleanAccountDigits = rawAccount.replace(/\D/g, '');
+
+  if (cleanAccountDigits.length < 4 && rawAccount.length < 4) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Account number must be at least 4 digits');
+  }
+
+  const last4 = cleanAccountDigits.length >= 4 
+    ? cleanAccountDigits.slice(-4) 
+    : rawAccount.slice(-4);
+  const maskedNumber = `•••• ${last4}`;
+
+  user.bankAccount = {
+    bankName: bankName.trim(),
+    accountHolderName: accountHolderName.trim(),
+    routingNumber: routingNumber.trim(),
+    accountNumber: rawAccount,
+    accountLast4: last4,
+    maskedAccountNumber: maskedNumber,
+    isConfigured: true,
+    updatedAt: new Date()
+  };
+
+  await user.save();
+
+  return {
+    message: 'Bank account saved successfully',
+    bankAccount: {
+      bankName: user.bankAccount.bankName,
+      accountHolderName: user.bankAccount.accountHolderName,
+      routingNumber: user.bankAccount.routingNumber,
+      accountNumber: user.bankAccount.accountNumber,
+      accountLast4: user.bankAccount.accountLast4,
+      maskedAccountNumber: user.bankAccount.maskedAccountNumber,
+      isConfigured: true,
+      updatedAt: user.bankAccount.updatedAt
+    }
+  };
+};
+/**
+ * 12. Delete / Remove Bank Account (Figma Node 40012508:6741)
+ */
+const deleteBankAccountService = async (userId) => {
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid User ID');
+  }
+
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
+  }
+
+  user.bankAccount = {
+    bankName: '',
+    accountHolderName: '',
+    routingNumber: '',
+    accountNumber: '',
+    accountLast4: '',
+    maskedAccountNumber: '',
+    isConfigured: false,
+    updatedAt: new Date()
+  };
+
+  await user.save();
+
+  return {
+    message: 'Bank account removed successfully'
+  };
+};
+
 module.exports = {
   getInstructorEarningsOverviewService,
   getInstructorTransactionsHistoryService,
@@ -815,6 +1072,9 @@ module.exports = {
   getAdminWithdrawalDetailsService,
   adminActionWithdrawalService,
   getAdminPlatformEarningsOverviewService,
-  getAdminPlatformTransactionsService
+  getAdminPlatformTransactionsService,
+  getBankAccountService,
+  saveBankAccountService,
+  deleteBankAccountService
 };
 

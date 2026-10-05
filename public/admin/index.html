@@ -59,8 +59,8 @@
       <!-- Navigation Menu Items -->
       <nav class="sidebar-nav">
         
-        <!-- Overview -->
-        <a href="#overview" class="nav-item" data-route="overview">
+        <!-- Overview (Figma 40012554:15436) -->
+        <a href="#overview" class="nav-item active" id="navItemOverview" data-route="overview" onclick="switchRoute('overview'); return false;">
           <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="3" y="3" width="7" height="7" rx="1"></rect>
             <rect x="14" y="3" width="7" height="7" rx="1"></rect>
@@ -91,7 +91,7 @@
         </div>
 
         <!-- Bookings -->
-        <a href="#bookings" class="nav-item" data-route="bookings">
+        <a href="#bookings" class="nav-item" id="navItemBookings" data-route="bookings">
           <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
             <line x1="16" y1="2" x2="16" y2="6"></line>
@@ -102,7 +102,7 @@
         </a>
 
         <!-- Verification Queue -->
-        <a href="#verification" class="nav-item" data-route="verification">
+        <a href="#verification" class="nav-item" id="navItemVerification" data-route="verification" onclick="switchRoute('verification'); return false;">
           <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
             <polyline points="9 12 11 14 15 10"></polyline>
@@ -110,8 +110,8 @@
           <span class="nav-label">Verification Queue</span>
         </a>
 
-        <!-- Disputes (ACTIVE SCREEN) -->
-        <a href="#disputes" class="nav-item active" data-route="disputes">
+        <!-- Disputes -->
+        <a href="#disputes" class="nav-item" id="navItemDisputes" data-route="disputes" onclick="switchRoute('disputes'); return false;">
           <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="10"></circle>
             <line x1="12" y1="8" x2="12" y2="12"></line>
@@ -212,19 +212,81 @@
         </div>
       </header>
 
-      <!-- Page Header (Figma 40012554:20375) -->
-      <div class="page-title-banner">
+      <!-- Page Header (Dynamic: Overview / Disputes) -->
+      <div class="page-title-banner" id="pageTitleBanner">
         <div class="breadcrumbs-row">
           <span class="breadcrumb-item">Overview</span>
           <span class="breadcrumb-slash">/</span>
-          <span class="breadcrumb-active">Disputes</span>
+          <span class="breadcrumb-active" id="headerBreadcrumbActive">Overview</span>
         </div>
-        <h1 class="page-title-text">Disputes</h1>
-        <p class="page-subtitle-text">Review and resolve booking disputes</p>
+        <h1 class="page-title-text" id="headerTitleText">Dashboard</h1>
+        <p class="page-subtitle-text" id="headerSubtitleText">Comprehensive business insights and performance metrics</p>
       </div>
 
-      <!-- Main Disputes Section Area (Figma 40012554:20395) -->
-      <main class="page-body-container">
+      <!-- ============================================== -->
+      <!-- OVERVIEW DASHBOARD VIEW (Figma 40012554:15436) -->
+      <!-- ============================================== -->
+      <main class="page-body-container" id="viewOverview">
+        <div class="overview-dashboard-container">
+          
+          <!-- 8 KPI Cards Grid -->
+          <div class="kpis-grid" id="kpiCardsContainer">
+            <!-- Hydrated by app.js -->
+          </div>
+
+          <!-- 2 Charts Grid (Bookings Overview & Earnings Overview) -->
+          <div class="charts-grid">
+            
+            <!-- Bookings Overview Card -->
+            <div class="dashboard-card">
+              <div class="dashboard-card-header">
+                <span class="dashboard-card-title">Bookings Overview</span>
+                <select class="dashboard-card-select" id="bookingsYearSelect" onchange="changeOverviewYear(this.value)">
+                  <option value="2026" selected>2026</option>
+                  <option value="2025">2025</option>
+                  <option value="2024">2024</option>
+                </select>
+              </div>
+              <div class="chart-body-wrapper" id="bookingsChartWrapper">
+                <!-- SVG Bar Chart -->
+              </div>
+            </div>
+
+            <!-- Earnings Overview Card -->
+            <div class="dashboard-card">
+              <div class="dashboard-card-header">
+                <span class="dashboard-card-title">Earnings Overview</span>
+                <select class="dashboard-card-select" id="earningsYearSelect" onchange="changeOverviewYear(this.value)">
+                  <option value="2026" selected>2026</option>
+                  <option value="2025">2025</option>
+                  <option value="2024">2024</option>
+                </select>
+              </div>
+              <div class="chart-body-wrapper" id="earningsChartWrapper">
+                <!-- SVG Area/Line Chart -->
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Pending Instructors Card -->
+          <div class="dashboard-card">
+            <div class="dashboard-card-header">
+              <span class="dashboard-card-title">Pending Instructors</span>
+              <a href="#verification" class="view-all-link" onclick="switchRoute('verification'); return false;">View All</a>
+            </div>
+            <div class="pending-instructors-list" id="pendingInstructorsList">
+              <!-- Hydrated by app.js -->
+            </div>
+          </div>
+
+        </div>
+      </main>
+
+      <!-- ============================================== -->
+      <!-- DISPUTES VIEW (Figma 40012554:20231)           -->
+      <!-- ============================================== -->
+      <main class="page-body-container hidden" id="viewDisputes">
         
         <!-- Filter Tabs & Search Bar Row (Figma 40012554:20397) -->
         <div class="controls-toolbar">
@@ -448,6 +510,9 @@
     <button class="lightbox-close">✕</button>
     <img src="" id="lightboxImg" alt="Enlarged evidence" />
   </div>
+
+  <!-- Chart Tooltip -->
+  <div class="chart-tooltip" id="chartTooltip"></div>
 
   <!-- Toast Notification Container -->
   <div class="toast-container" id="adminToastContainer"></div>

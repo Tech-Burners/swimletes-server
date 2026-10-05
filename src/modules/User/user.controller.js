@@ -25,7 +25,8 @@ const {
   getAdminInstructorsListService,
   getAdminInstructorDetailsService,
   getAdminInstructorReviewsService,
-  updateInstructorStatusService
+  updateInstructorStatusService,
+  getAdminDashboardOverviewService
 } = require("./user.service");
 const response = require("../../helpers/response");
 
@@ -450,6 +451,20 @@ const updateInstructorStatusController = catchAsync(async (req, res) => {
   );
 });
 
+// Admin Dashboard Overview (Figma Node 40012554:15436)
+const getAdminDashboardOverviewController = catchAsync(async (req, res) => {
+  const result = await getAdminDashboardOverviewService(req.query);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      type: 'AdminDashboardOverview',
+      message: 'Admin dashboard overview fetched successfully',
+      data: result
+    })
+  );
+});
+
 module.exports = {
   suspendUserController,
   banUserController,
@@ -477,5 +492,6 @@ module.exports = {
   getAdminInstructorsListController,
   getAdminInstructorDetailsController,
   getAdminInstructorReviewsController,
-  updateInstructorStatusController
+  updateInstructorStatusController,
+  getAdminDashboardOverviewController
 };

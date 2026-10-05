@@ -10,7 +10,10 @@ const {
   getAdminWithdrawalDetails,
   adminActionWithdrawal,
   getAdminPlatformEarningsOverview,
-  getAdminPlatformTransactions
+  getAdminPlatformTransactions,
+  getBankAccount,
+  saveBankAccount,
+  deleteBankAccount
 } = require('./earnings.controller');
 
 // ==================== 1. Admin Platform Earnings (Figma Node 40012563:22986) ====================
@@ -40,6 +43,13 @@ router.get('/transactions/history', auth(['instructor', 'admin']), getInstructor
 // Instructor Withdrawal Request
 router.post('/withdraw', auth(['instructor', 'admin']), requestWithdrawal);
 router.post('/withdrawal', auth(['instructor', 'admin']), requestWithdrawal);
+
+// ==================== 4. Instructor Bank Account (Figma Node 40012508:6741) ====================
+router.get('/bank-account', auth(['instructor', 'user', 'admin']), getBankAccount);
+router.post('/bank-account', auth(['instructor', 'user', 'admin']), saveBankAccount);
+router.put('/bank-account', auth(['instructor', 'user', 'admin']), saveBankAccount);
+router.patch('/bank-account', auth(['instructor', 'user', 'admin']), saveBankAccount);
+router.delete('/bank-account', auth(['instructor', 'user', 'admin']), deleteBankAccount);
 
 module.exports = router;
 

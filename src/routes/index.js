@@ -13,6 +13,12 @@ const chatRoutes = require('../modules/Chat/chat.route');
 const earningsRoutes = require('../modules/Earnings/earnings.route');
 
 const refundRoutes = require('../modules/Booking/refund.route');
+const { getAdminDashboardOverviewController } = require('../modules/User/user.controller');
+const { tokenCheck } = require('../middlewares/auth');
+
+const adminRoutes = express.Router();
+adminRoutes.get('/overview', tokenCheck, getAdminDashboardOverviewController);
+adminRoutes.get('/dashboard', tokenCheck, getAdminDashboardOverviewController);
 
 const moduleRoutes = [
   {
@@ -106,6 +112,10 @@ const moduleRoutes = [
   {
     path: '/refunds',
     route: refundRoutes
+  },
+  {
+    path: '/admin',
+    route: adminRoutes
   }
 ];
 
