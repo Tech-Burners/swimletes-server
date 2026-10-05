@@ -287,8 +287,13 @@ const confirmBookingPayment = catchAsync(async (req, res) => {
 // Stripe Webhook Event Receiver
 const stripeWebhookController = catchAsync(async (req, res) => {
   const signature = req.headers['stripe-signature'];
-  const result = await handleStripeWebhookService(req.rawBody, signature, req.body);
-  return res.status(status.OK).json(result);
+  try {
+    const result = await handleStripeWebhookService(req.rawBody, signature, req.body);
+    return res.status(status?.OK || 200).json(result || { received: true });
+  } catch (err) {
+    console.error('[Stripe Webhook Error]', err.message);
+    return res.status(status?.OK || 200).json({ received: true, warning: err.message });
+  }
 });
 
 // Create or re-generate Stripe Checkout Link for a Booking

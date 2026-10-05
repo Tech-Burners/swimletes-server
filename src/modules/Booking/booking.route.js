@@ -84,6 +84,7 @@ router.post('/create-payment-intent', auth(['user', 'admin']), createBookingPaym
 router.post('/confirm-payment', auth(['user', 'admin']), confirmBookingPayment);
 router.post('/:id/confirm-payment', auth(['user', 'admin']), confirmBookingPayment);
 router.post('/webhook', stripeWebhookController);
+router.post('/weebhook', stripeWebhookController);
 
 // 3. Listing & Tab Badges (User & Instructor)
 router.get('/my-bookings', auth(['user', 'instructor', 'admin']), getMyBookings);

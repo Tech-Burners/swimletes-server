@@ -2,7 +2,7 @@ const unlinkImage = require('../helpers/unlinkImage');
 const logger = require('../helpers/logger');
 const response = require('../helpers/response');
 const mongoose = require('mongoose');
-const httpStatus = require('http-status');
+const { status: httpStatus } = require('http-status');
 const ApiError = require('../helpers/ApiError');
 
 function errorConverter(err, req, res, next) {
@@ -10,7 +10,7 @@ function errorConverter(err, req, res, next) {
 
   if (!(error instanceof ApiError)) {
     // Use default values if they are missing
-    const statusCode = error.statusCode || (error instanceof mongoose.Error ? httpStatus.BAD_REQUEST : httpStatus.INTERNAL_SERVER_ERROR);
+    const statusCode = error.statusCode || (error instanceof mongoose.Error ? (httpStatus?.BAD_REQUEST || 400) : (httpStatus?.INTERNAL_SERVER_ERROR || 500));
     const message = error.message || 'An unknown error occurred';
 
     // Convert the error to ApiError with default values
@@ -22,7 +22,7 @@ function errorConverter(err, req, res, next) {
 
 function notFoundHandler(req, res, next) {
   const message = `Requested API not found: ${req.method} ${req.originalUrl}`;
-  next(new ApiError(httpStatus.NOT_FOUND, message));
+  next(new ApiError(httpStatus?.NOT_FOUND || 404, message));
 }
 
 function errorHandler(err, req, res, next) {

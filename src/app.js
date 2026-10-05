@@ -106,6 +106,8 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
 });
 
 // Routes
+const webhookRoutes = require("./modules/Booking/webhook.route");
+app.use(["/webhook", "/weebhook", "/helpers", "/stripe"], webhookRoutes);
 app.use("/api/v1", routes);
 
 // Instructor UI Pages (Figma 40012288:1871, 40012321:3120, 40012392:3369)

@@ -1,7 +1,7 @@
 class ApiError extends Error {
-  constructor(statusCode, message = req.t('unexpected-error'), stack = '') {
+  constructor(statusCode = 500, message = 'An unexpected error occurred', stack = '') {
     super(message);
-    this.statusCode = statusCode || 500; // Default to 500 if no status code is provided
+    this.statusCode = statusCode || 500;
     if (stack) {
       this.stack = stack;
     } else {

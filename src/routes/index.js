@@ -13,6 +13,7 @@ const chatRoutes = require('../modules/Chat/chat.route');
 const earningsRoutes = require('../modules/Earnings/earnings.route');
 
 const refundRoutes = require('../modules/Booking/refund.route');
+const webhookRoutes = require('../modules/Booking/webhook.route');
 const { getAdminDashboardOverviewController } = require('../modules/User/user.controller');
 const { tokenCheck } = require('../middlewares/auth');
 
@@ -21,6 +22,22 @@ adminRoutes.get('/overview', tokenCheck, getAdminDashboardOverviewController);
 adminRoutes.get('/dashboard', tokenCheck, getAdminDashboardOverviewController);
 
 const moduleRoutes = [
+  {
+    path: '/helpers',
+    route: webhookRoutes,
+  },
+  {
+    path: '/webhook',
+    route: webhookRoutes,
+  },
+  {
+    path: '/weebhook',
+    route: webhookRoutes,
+  },
+  {
+    path: '/stripe',
+    route: webhookRoutes,
+  },
   {
     path: '/auth',
     route: authRoutes,
