@@ -88,11 +88,11 @@ const transactionSchema = new mongoose.Schema(
       default: ''
     },
     bankDetails: {
-      bankName: { type: String, default: 'Chase' },
+      bankName: { type: String, default: '' },
       accountHolderName: { type: String, default: '' },
       routingNumber: { type: String, default: '' },
       accountNumber: { type: String, default: '' },
-      accountLast4: { type: String, default: '8821' },
+      accountLast4: { type: String, default: '' },
       maskedAccountNumber: { type: String, default: '' }
     },
     stripePayoutId: {

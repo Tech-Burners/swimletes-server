@@ -413,14 +413,14 @@ const formatReviewAndPayResponse = (booking, checkoutSession = null) => {
     }
   }
 
-  const signerName = b.waiver?.legalName || b.client?.fullName || 'Paula McMahon';
-  const waiverText = b.waiver?.isSigned ? `Form 1 signed by ${signerName}` : `Form 1 signed by ${signerName}`;
+  const signerName = b.waiver?.legalName || b.client?.fullName || '';
+  const waiverText = b.waiver?.isSigned ? `Form 1 signed by ${signerName}` : '';
 
   const sessionUrl = checkoutSession?.url || b.payment?.checkoutUrl || '';
   const sessionId = checkoutSession?.id || b.payment?.stripeSessionId || '';
 
-  const lessonPrice = Number(b.pricing?.lessonPrice || 60);
-  const bookingFee = Number(b.pricing?.bookingFee || 3);
+  const lessonPrice = Number(b.pricing?.lessonPrice || 0);
+  const bookingFee = Number(b.pricing?.bookingFee || 0);
   const totalAmount = Number(b.pricing?.totalAmount || (lessonPrice + bookingFee));
 
   return {
@@ -431,7 +431,7 @@ const formatReviewAndPayResponse = (booking, checkoutSession = null) => {
     sessionId: sessionId,
     instructor: {
       _id: b.instructor?._id,
-      fullName: b.instructor?.fullName || 'Instructor',
+      fullName: b.instructor?.fullName || '',
       image: b.instructor?.image || ''
     },
     swimmer: {
@@ -450,9 +450,9 @@ const formatReviewAndPayResponse = (booking, checkoutSession = null) => {
       address: b.location?.address || ''
     },
     waiver: {
-      isSigned: Boolean(b.waiver?.isSigned ?? true),
+      isSigned: Boolean(b.waiver?.isSigned),
       text: waiverText,
-      date: waiverSignedDate || '30th July 2026'
+      date: waiverSignedDate || ''
     },
     price: {
       lessonPrice,
@@ -1472,16 +1472,26 @@ const formatMemberDuration = (createdAt) => {
  * Get Booking Details by ID (Clean database data, matching Figma 40012321:3120, no unnecessary internal fields)
  */
 const getBookingByIdService = async (bookingId, userId, userRole) => {
-  if (!mongoose.Types.ObjectId.isValid(bookingId)) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid Booking ID');
+  let booking = null;
+
+  if (mongoose.Types.ObjectId.isValid(bookingId)) {
+    booking = await Booking.findById(bookingId)
+      .populate('client', 'fullName email image number address createdAt avgRating totalReviews ratingCount')
+      .populate('instructor', 'fullName email image number bio address certifications avgRating totalReviews ratingCount')
+      .populate('clientReview')
+      .populate('instructorReview')
+      .populate('chat', '_id');
   }
 
-  const booking = await Booking.findById(bookingId)
-    .populate('client', 'fullName email image number address createdAt avgRating totalReviews ratingCount')
-    .populate('instructor', 'fullName email image number bio address certifications avgRating totalReviews ratingCount')
-    .populate('clientReview')
-    .populate('instructorReview')
-    .populate('chat', '_id');
+  if (!booking) {
+    // Try finding by bookingId reference string (e.g. "SW-133727" or "BK-88214")
+    booking = await Booking.findOne({ bookingId })
+      .populate('client', 'fullName email image number address createdAt avgRating totalReviews ratingCount')
+      .populate('instructor', 'fullName email image number bio address certifications avgRating totalReviews ratingCount')
+      .populate('clientReview')
+      .populate('instructorReview')
+      .populate('chat', '_id');
+  }
 
   if (!booking) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
@@ -1532,205 +1542,116 @@ const getBookingByIdService = async (bookingId, userId, userRole) => {
   }
 
   const b = booking.toObject ? booking.toObject() : booking;
-  const inProgress = getIsInProgress(b);
-  const effectiveStatus = (b.status === 'accepted' && inProgress) ? 'active' : b.status;
-  const clientCompleted = b.status === 'completed' || Boolean(b.clientCompleted);
-  const instructorCompleted = b.status === 'completed' || Boolean(b.instructorCompleted);
-  const bothCompleted = b.status === 'completed' || (clientCompleted && instructorCompleted);
 
-  // Real client stats from database (if client exists)
-  let clientStats = null;
-  if (b.client && b.client._id) {
-    const [bookedCount, cancelCount] = await Promise.all([
-      Booking.countDocuments({ client: b.client._id, status: { $in: ['completed', 'accepted', 'active'] } }),
-      Booking.countDocuments({ client: b.client._id, status: 'cancelled' })
-    ]);
-    clientStats = {
-      lessonsBooked: bookedCount,
-      cancels: cancelCount,
-      memberSince: formatMemberDuration(b.client.createdAt)
-    };
-  }
-
-  // Real schedule conflict check from database (if instructor exists)
-  let scheduleConflict = {
-    hasConflict: false,
-    title: 'No schedule conflict',
-    description: 'No other lessons scheduled for this day'
-  };
-
-  if (b.instructor && b.instructor._id && b.date) {
-    try {
-      const dayStart = new Date(b.date);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(b.date);
-      dayEnd.setHours(23, 59, 59, 999);
-
-      const otherBookings = await Booking.find({
-        instructor: b.instructor._id,
-        _id: { $ne: b._id },
-        date: { $gte: dayStart, $lte: dayEnd },
-        status: { $in: ['accepted', 'active'] }
-      }).sort({ startTime: 1 });
-
-      const conflict = otherBookings.find((ob) => ob.startTime === b.startTime);
-
-      if (conflict) {
-        scheduleConflict = {
-          hasConflict: true,
-          title: 'Schedule conflict detected',
-          description: `Conflict with another lesson at ${conflict.startTime} – ${conflict.endTime}`
-        };
-      } else if (otherBookings.length > 0) {
-        const nextBooking = otherBookings[0];
-        scheduleConflict = {
-          hasConflict: false,
-          title: 'No schedule conflict',
-          description: `Your other lesson that day is ${nextBooking.startTime} – ${nextBooking.endTime}`
-        };
-      }
-    } catch (err) {
-      // Continue cleanly if error checking conflict
-    }
-  }
-
-  // Format date and time
-  const bookingDate = parseBookingDate(b.date);
-  const daysShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-  let formattedDate = '';
-  if (bookingDate && !isNaN(bookingDate.getTime())) {
-    const dayName = daysShort[bookingDate.getDay()];
-    const monthName = monthsShort[bookingDate.getMonth()];
-    const dateNum = bookingDate.getDate();
-    formattedDate = `${dayName}, ${monthName} ${dateNum} · ${b.startTime || ''}`;
-  }
-
-  const lessonSubtitle = b.startTime && b.endTime
-    ? `${b.startTime} – ${b.endTime} · ${b.lessonType || '60-min private lesson'}`
-    : (b.lessonType || '60-min private lesson');
-
-  const comfortLevelMap = {
-    never_been_in_water: 'Never been in water',
-    nervous_beginner: 'Nervous Beginner',
-    can_float_paddle: 'Can float & paddle',
-    swims_confidently: 'Swims Confidently'
-  };
-
-  // Expiration countdown for pending booking requests
-  let expiresIn = null;
-  if (effectiveStatus === 'pending' && b.expiresAt) {
-    const diffMs = new Date(b.expiresAt).getTime() - Date.now();
-    if (diffMs <= 0) {
-      expiresIn = 'Expired';
-    } else {
-      const hours = Math.floor(diffMs / (1000 * 60 * 60));
-      const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-      expiresIn = hours > 0 ? `Expires in ${hours}h ${minutes}m` : `Expires in ${minutes}m`;
-    }
-  }
-
-  const parentPays = Number(b.pricing?.totalAmount || 0);
-  const youReceive = Number(b.pricing?.instructorEarnings || 0);
-  const commissionAmount = Number(b.pricing?.platformCommission || (parentPays - youReceive));
-  const commissionPercentage = parentPays > 0 ? Math.round((commissionAmount / parentPays) * 100) : 15;
-
-  const clientRating = Number(b.client?.avgRating || 0);
-  const clientReviewCount = Number(b.client?.totalReviews || b.client?.ratingCount || 0);
-
-  const instructorRating = Number(b.instructor?.avgRating || 0);
-  const instructorReviewCount = Number(b.instructor?.totalReviews || b.instructor?.ratingCount || 0);
+  const instructorUser = b.instructor || null;
+  const clientUser = b.client || null;
 
   return {
     _id: b._id,
-    bookingId: b.bookingId || '',
-    status: effectiveStatus,
-    rawStatus: b.status,
-    inProgress,
-    isInProgress: inProgress,
-    clientCompleted,
-    instructorCompleted,
-    isClientCompleted: clientCompleted,
-    isInstructorCompleted: instructorCompleted,
-    bothCompleted,
-    waitingForOtherParty: (
-      (isClient && clientCompleted && !instructorCompleted) ||
-      (isInstructor && instructorCompleted && !clientCompleted)
-    ),
-    clientCompletedAt: b.clientCompletedAt || null,
-    instructorCompletedAt: b.instructorCompletedAt || null,
-    completedAt: b.completedAt || null,
-    formattedDate,
-    lessonSubtitle,
-    startTime: b.startTime || '',
-    endTime: b.endTime || '',
-    time: b.startTime && b.endTime ? `${b.startTime} – ${b.endTime}` : (b.startTime || ''),
-    lessonType: b.lessonType || '60-min private lesson',
-    ...(effectiveStatus === 'pending' && expiresIn ? { expiresIn } : {}),
-    pricing: {
-      parentPays,
-      commissionPercentage,
-      commissionAmount,
-      youReceive
-    },
-    client: b.client ? {
-      _id: b.client._id,
-      fullName: b.client.fullName || '',
-      image: b.client.image || '',
-      rating: clientRating,
-      totalReviews: clientReviewCount,
-      ratingText: clientReviewCount > 0 ? `${clientRating.toFixed(1)} · rated by ${clientReviewCount} instructor${clientReviewCount === 1 ? '' : 's'}` : 'New client',
-      lessonsBooked: clientStats?.lessonsBooked || 0,
-      cancels: clientStats?.cancels || 0,
-      memberSince: clientStats?.memberSince || 'New'
+    bookingId: b.bookingId || null,
+    status: b.status,
+    date: b.date,
+    startTime: b.startTime || null,
+    endTime: b.endTime || null,
+    duration: b.duration ?? null,
+    lessonType: b.lessonType || null,
+
+    // Instructor Card
+    instructor: instructorUser ? {
+      _id: instructorUser._id || null,
+      fullName: instructorUser.fullName || null,
+      image: instructorUser.image || null,
+      email: instructorUser.email || null,
+      number: instructorUser.number || null,
+      rating: instructorUser.avgRating ?? null,
+      avgRating: instructorUser.avgRating ?? null,
+      totalReviews: instructorUser.totalReviews ?? (instructorUser.ratingCount ?? null),
+      chatId: resolvedChatId || null
     } : null,
-    instructor: b.instructor ? {
-      _id: b.instructor._id,
-      fullName: b.instructor.fullName || '',
-      image: b.instructor.image || '',
-      rating: instructorRating,
-      totalReviews: instructorReviewCount,
-      ratingText: instructorReviewCount > 0 ? `${instructorRating.toFixed(1)} (${instructorReviewCount} review${instructorReviewCount === 1 ? '' : 's'})` : 'No reviews yet'
+
+    // Client
+    client: clientUser ? {
+      _id: clientUser._id || null,
+      fullName: clientUser.fullName || null,
+      image: clientUser.image || null,
+      email: clientUser.email || null,
+      number: clientUser.number || null
     } : null,
-    swimmer: {
-      name: b.swimmer?.name || '',
-      age: b.swimmer?.age || 0,
-      comfortLevel: comfortLevelMap[b.swimmer?.comfortLevel] || b.swimmer?.comfortLevel || '',
-      notes: b.swimmer?.notes || ''
+
+    // Swimmer Details
+    swimmer: b.swimmer ? {
+      name: b.swimmer.name || null,
+      age: b.swimmer.age ?? null,
+      comfortLevel: b.swimmer.comfortLevel || null,
+      notes: b.swimmer.notes || null,
+      bookedFor: b.swimmer.bookedFor || null
+    } : null,
+
+    // Lesson Details
+    lesson: {
+      type: b.lessonType || null,
+      duration: b.duration ?? null,
+      price: b.pricing?.lessonPrice ?? null
     },
-    location: {
-      poolName: b.location?.poolName || '',
-      address: b.location?.address || '',
-      coordinates: b.location?.location?.coordinates || []
-    },
-    payment: {
-      method: b.payment?.method || 'card',
-      status: b.payment?.status || 'unpaid',
-      transactionId: b.payment?.transactionId || '',
-      ...(b.payment?.paidAt ? { paidAt: b.payment.paidAt } : {})
-    },
-    ...(['cancelled', 'declined'].includes(effectiveStatus) ? {
-      cancelledBy: b.cancelledBy || null,
-      cancellationReason: b.cancellationReason || null,
-      cancellationWindow: b.cancellationWindow || null,
-      refundAmount: Number(b.refundAmount || 0),
-      cancelledAt: b.cancelledAt || null
-    } : {}),
-    scheduleConflict,
-    chatId: resolvedChatId || (b.chat?._id ? b.chat._id.toString() : (b.chat ? b.chat.toString() : '')),
-    canChat: ['accepted', 'active', 'completed'].includes(effectiveStatus),
-    canAccept: b.status === 'pending',
-    canDecline: b.status === 'pending',
-    canStart: b.status === 'accepted' && !inProgress,
-    canComplete: ['accepted', 'active'].includes(effectiveStatus) && (
-      isAdmin
-        ? true
-        : isInstructor
-          ? !b.instructorCompleted
-          : !b.clientCompleted
-    ),
-    canCancel: ['pending', 'accepted'].includes(b.status) && !inProgress
+
+    // Waiver Agreement
+    waiver: b.waiver ? {
+      isSigned: Boolean(b.waiver.isSigned),
+      legalName: b.waiver.legalName || null,
+      signedDate: b.waiver.signedDate || null,
+      signerRelationship: b.waiver.signerRelationship || null,
+      waiverVersion: b.waiver.waiverVersion || null
+    } : null,
+
+    // Location
+    location: b.location ? {
+      locationType: b.location.locationType || null,
+      poolName: b.location.poolName || null,
+      address: b.location.address || null,
+      coordinates: (b.location?.location?.coordinates && b.location.location.coordinates.length === 2)
+        ? b.location.location.coordinates
+        : []
+    } : null,
+
+    // Pricing Breakdown
+    pricing: b.pricing ? {
+      lessonPrice: b.pricing.lessonPrice ?? null,
+      bookingFee: b.pricing.bookingFee ?? null,
+      poolEntryFee: b.pricing.poolEntryFee ?? null,
+      travelFee: b.pricing.travelFee ?? null,
+      discountAmount: b.pricing.discountAmount ?? null,
+      totalAmount: b.pricing.totalAmount ?? null,
+      ...(isInstructor || isAdmin ? {
+        instructorEarnings: b.pricing.instructorEarnings ?? null,
+        platformCommission: b.pricing.platformCommission ?? null
+      } : {})
+    } : null,
+
+    // Payment Information
+    payment: b.payment ? {
+      method: b.payment.method || null,
+      status: b.payment.status || null,
+      cardBrand: b.payment.cardBrand || null,
+      last4: b.payment.last4 || null,
+      paidAt: b.payment.paidAt || null,
+      transactionId: b.payment.transactionId || null,
+      receiptUrl: b.payment.status === 'paid' ? `/api/v1/booking/${b._id}/receipt` : null
+    } : null,
+
+    // Cancellation Details & Eligibility
+    canCancel: ['pending', 'accepted'].includes(b.status),
+    cancellationWindow: b.cancellationWindow || null,
+    cancelledBy: b.cancelledBy || null,
+    cancellationReason: b.cancellationReason || null,
+    refundAmount: b.refundAmount ?? null,
+    cancelledAt: b.cancelledAt || null,
+
+    // Actions / Chat
+    canChat: ['accepted', 'active', 'completed'].includes(b.status),
+    chatId: resolvedChatId || null,
+
+    createdAt: b.createdAt,
+    updatedAt: b.updatedAt
   };
 };
 

@@ -30,7 +30,7 @@ const userSchema = new mongoose.Schema({
     }
   },
   role: { type: String, enum: ['user', 'instructor', 'admin'], default: 'user' },
-  status: { type: String, enum: ['active', 'suspended', 'banned', 'pending'], default: 'active' },
+  status: { type: String, enum: ['active', 'suspended', 'banned', 'pending', 'rejected'], default: 'active' },
   isDeleted: { type: Boolean, default: false },
   password: { type: String, required: false },
   googleId: { type: String },

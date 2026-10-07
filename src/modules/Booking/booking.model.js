@@ -173,6 +173,14 @@ const paymentInfoSchema = new mongoose.Schema(
       type: String,
       default: ''
     },
+    cardBrand: {
+      type: String,
+      default: ''
+    },
+    last4: {
+      type: String,
+      default: ''
+    },
     paidAt: {
       type: Date
     },

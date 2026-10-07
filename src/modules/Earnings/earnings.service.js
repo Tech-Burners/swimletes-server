@@ -314,13 +314,13 @@ const requestWithdrawalService = async (instructorId, data = {}) => {
     );
   }
 
-  const bankName = (data.bankName || savedBank.bankName || 'Chase Bank').trim();
-  const accountHolderName = (data.accountHolderName || savedBank.accountHolderName || user?.fullName || 'Instructor').trim();
+  const bankName = (data.bankName || savedBank.bankName || '').trim();
+  const accountHolderName = (data.accountHolderName || savedBank.accountHolderName || user?.fullName || '').trim();
   const routingNumber = (data.routingNumber || savedBank.routingNumber || '').trim();
   const rawAccountNumber = (data.accountNumber || savedBank.accountNumber || '').trim();
-  const accountLast4 = (data.accountLast4 || savedBank.accountLast4 || (rawAccountNumber ? rawAccountNumber.slice(-4) : '4515')).trim();
-  const maskedAccountNumber = (savedBank.maskedAccountNumber || (accountLast4 ? `•••• ${accountLast4}` : (rawAccountNumber ? `•••• ${rawAccountNumber.slice(-4)}` : '•••• 4515'))).trim();
-  const note = data.note || data.description || 'Monthly payout request.';
+  const accountLast4 = (data.accountLast4 || savedBank.accountLast4 || (rawAccountNumber ? rawAccountNumber.slice(-4) : '')).trim();
+  const maskedAccountNumber = (savedBank.maskedAccountNumber || (accountLast4 ? `•••• ${accountLast4}` : (rawAccountNumber ? `•••• ${rawAccountNumber.slice(-4)}` : ''))).trim();
+  const note = (data.note || data.description || '').trim();
   const now = new Date();
   const dateStr = `${monthsShort[now.getMonth()]} ${now.getDate()}`;
 
@@ -444,12 +444,25 @@ const getAdminPendingWithdrawalsService = async (queryParams = {}) => {
     const availableVal = t.availableBalanceAtRequest || amountVal;
     const instBank = t.instructor?.bankAccount || {};
 
-    const bankName = t.bankDetails?.bankName || instBank.bankName || 'Chase Bank';
-    const accountHolderName = t.bankDetails?.accountHolderName || instBank.accountHolderName || instructorName;
-    const routingNumber = t.bankDetails?.routingNumber || instBank.routingNumber || '';
-    const rawAccountNumber = t.bankDetails?.accountNumber || instBank.accountNumber || '';
-    const accountLast4 = t.bankDetails?.accountLast4 || instBank.accountLast4 || (rawAccountNumber ? rawAccountNumber.slice(-4) : '4515');
-    const maskedAccountNumber = t.bankDetails?.maskedAccountNumber || instBank.maskedAccountNumber || (accountLast4 ? `•••• ${accountLast4}` : (rawAccountNumber ? `•••• ${rawAccountNumber.slice(-4)}` : '•••• 4515'));
+    const bankName = (t.bankDetails?.bankName || instBank.bankName || '').trim();
+    const accountHolderName = (t.bankDetails?.accountHolderName || instBank.accountHolderName || instructorName).trim();
+    const routingNumber = (t.bankDetails?.routingNumber || instBank.routingNumber || '').trim();
+    const rawAccountNumber = (t.bankDetails?.accountNumber || instBank.accountNumber || '').trim();
+    const accountLast4 = (t.bankDetails?.accountLast4 || instBank.accountLast4 || (rawAccountNumber ? rawAccountNumber.slice(-4) : '')).trim();
+    const maskedAccountNumber = (t.bankDetails?.maskedAccountNumber || instBank.maskedAccountNumber || (accountLast4 ? `•••• ${accountLast4}` : (rawAccountNumber ? `•••• ${rawAccountNumber.slice(-4)}` : ''))).trim();
+
+    const formattedBankName = bankName ? (bankName.toLowerCase().includes('bank') ? bankName : `${bankName} Bank`) : '';
+    const bankInfo = {
+      bankName: formattedBankName,
+      accountHolderName,
+      accountHolder: accountHolderName,
+      routingNumber,
+      accountNumber: rawAccountNumber,
+      accountLast4,
+      maskedAccountNumber,
+      isConfigured: Boolean(routingNumber || rawAccountNumber || accountLast4 || bankName),
+      securityNotice: 'Bank details are encrypted and handled securely.'
+    };
 
     return {
       _id: t._id,
@@ -462,15 +475,9 @@ const getAdminPendingWithdrawalsService = async (queryParams = {}) => {
         avatar: t.instructor?.image || null,
         initials: getInitials(instructorName)
       },
-      bankName: bankName.endsWith('Bank') ? bankName : `${bankName} Bank`,
-      bankDetails: {
-        bankName: bankName.endsWith('Bank') ? bankName : `${bankName} Bank`,
-        accountHolderName,
-        routingNumber,
-        accountNumber: rawAccountNumber,
-        accountLast4,
-        maskedAccountNumber
-      },
+      bankName: formattedBankName,
+      bankDetails: bankInfo,
+      bankAccount: bankInfo,
       requestedAmount: amountVal,
       availableBalance: availableVal,
       requestDate: t.date,
@@ -541,12 +548,25 @@ const getAdminWithdrawalHistoryService = async (queryParams = {}) => {
     const isCompleted = t.status === 'completed';
     const instBank = t.instructor?.bankAccount || {};
 
-    const bankName = t.bankDetails?.bankName || instBank.bankName || 'Chase Bank';
-    const accountHolderName = t.bankDetails?.accountHolderName || instBank.accountHolderName || instructorName;
-    const routingNumber = t.bankDetails?.routingNumber || instBank.routingNumber || '';
-    const rawAccountNumber = t.bankDetails?.accountNumber || instBank.accountNumber || '';
-    const accountLast4 = t.bankDetails?.accountLast4 || instBank.accountLast4 || (rawAccountNumber ? rawAccountNumber.slice(-4) : '4515');
-    const maskedAccountNumber = t.bankDetails?.maskedAccountNumber || instBank.maskedAccountNumber || (accountLast4 ? `•••• ${accountLast4}` : (rawAccountNumber ? `•••• ${rawAccountNumber.slice(-4)}` : '•••• 4515'));
+    const bankName = (t.bankDetails?.bankName || instBank.bankName || '').trim();
+    const accountHolderName = (t.bankDetails?.accountHolderName || instBank.accountHolderName || instructorName).trim();
+    const routingNumber = (t.bankDetails?.routingNumber || instBank.routingNumber || '').trim();
+    const rawAccountNumber = (t.bankDetails?.accountNumber || instBank.accountNumber || '').trim();
+    const accountLast4 = (t.bankDetails?.accountLast4 || instBank.accountLast4 || (rawAccountNumber ? rawAccountNumber.slice(-4) : '')).trim();
+    const maskedAccountNumber = (t.bankDetails?.maskedAccountNumber || instBank.maskedAccountNumber || (accountLast4 ? `•••• ${accountLast4}` : (rawAccountNumber ? `•••• ${rawAccountNumber.slice(-4)}` : ''))).trim();
+
+    const formattedBankName = bankName ? (bankName.toLowerCase().includes('bank') ? bankName : `${bankName} Bank`) : '';
+    const bankInfo = {
+      bankName: formattedBankName,
+      accountHolderName,
+      accountHolder: accountHolderName,
+      routingNumber,
+      accountNumber: rawAccountNumber,
+      accountLast4,
+      maskedAccountNumber,
+      isConfigured: Boolean(routingNumber || rawAccountNumber || accountLast4 || bankName),
+      securityNotice: 'Bank details are encrypted and handled securely.'
+    };
 
     return {
       _id: t._id,
@@ -559,15 +579,9 @@ const getAdminWithdrawalHistoryService = async (queryParams = {}) => {
         avatar: t.instructor?.image || null,
         initials: getInitials(instructorName)
       },
-      bankName: bankName.endsWith('Bank') ? bankName : `${bankName} Bank`,
-      bankDetails: {
-        bankName: bankName.endsWith('Bank') ? bankName : `${bankName} Bank`,
-        accountHolderName,
-        routingNumber,
-        accountNumber: rawAccountNumber,
-        accountLast4,
-        maskedAccountNumber
-      },
+      bankName: formattedBankName,
+      bankDetails: bankInfo,
+      bankAccount: bankInfo,
       amount: amountVal,
       requestDate: t.date,
       requestDateFormatted: formatDateShort(t.date),
@@ -604,15 +618,29 @@ const getAdminWithdrawalDetailsService = async (id) => {
   const instructorName = inst.fullName || 'Instructor';
   const savedBank = inst.bankAccount || {};
 
-  const bankName = withdrawal.bankDetails?.bankName || savedBank.bankName || 'Chase Bank';
-  const accountHolder = withdrawal.bankDetails?.accountHolderName || savedBank.accountHolderName || instructorName;
-  const routingNumber = withdrawal.bankDetails?.routingNumber || savedBank.routingNumber || '';
-  const rawAccountNumber = withdrawal.bankDetails?.accountNumber || savedBank.accountNumber || '';
-  const accountLast4 = withdrawal.bankDetails?.accountLast4 || savedBank.accountLast4 || (rawAccountNumber ? rawAccountNumber.slice(-4) : '4515');
-  const maskedAccountNumber = withdrawal.bankDetails?.maskedAccountNumber || savedBank.maskedAccountNumber || (accountLast4 ? `•••• ${accountLast4}` : (rawAccountNumber ? `•••• ${rawAccountNumber.slice(-4)}` : '•••• 4515'));
+  const bankName = (withdrawal.bankDetails?.bankName || savedBank.bankName || '').trim();
+  const accountHolderName = (withdrawal.bankDetails?.accountHolderName || savedBank.accountHolderName || instructorName).trim();
+  const routingNumber = (withdrawal.bankDetails?.routingNumber || savedBank.routingNumber || '').trim();
+  const rawAccountNumber = (withdrawal.bankDetails?.accountNumber || savedBank.accountNumber || '').trim();
+  const accountLast4 = (withdrawal.bankDetails?.accountLast4 || savedBank.accountLast4 || (rawAccountNumber ? rawAccountNumber.slice(-4) : '')).trim();
+  const maskedAccountNumber = (withdrawal.bankDetails?.maskedAccountNumber || savedBank.maskedAccountNumber || (accountLast4 ? `•••• ${accountLast4}` : (rawAccountNumber ? `•••• ${rawAccountNumber.slice(-4)}` : ''))).trim();
 
   const requestedAmount = Math.abs(withdrawal.grossAmount || withdrawal.netAmount || 0);
   const availableBalance = withdrawal.availableBalanceAtRequest || 0;
+
+  const formattedBankName = bankName ? (bankName.toLowerCase().includes('bank') ? bankName : `${bankName} Bank`) : '';
+
+  const bankInfo = {
+    bankName: formattedBankName,
+    accountHolderName,
+    accountHolder: accountHolderName,
+    routingNumber,
+    accountNumber: rawAccountNumber,
+    accountLast4,
+    maskedAccountNumber,
+    isConfigured: Boolean(routingNumber || rawAccountNumber || accountLast4 || bankName),
+    securityNotice: 'Bank details are encrypted and handled securely.'
+  };
 
   return {
     _id: withdrawal._id,
@@ -620,6 +648,7 @@ const getAdminWithdrawalDetailsService = async (id) => {
     instructor: {
       _id: inst._id,
       name: instructorName,
+      fullName: instructorName,
       email: inst.email || '',
       phone: inst.number || inst.phone || '',
       avatar: inst.image || null,
@@ -634,15 +663,10 @@ const getAdminWithdrawalDetailsService = async (id) => {
     requestDate: withdrawal.date,
     requestDateRelative: formatRelativeTime(withdrawal.date),
     requestDateFormatted: formatDateShort(withdrawal.date),
-    note: withdrawal.note || withdrawal.description || 'Monthly payout request.',
-    bankDetails: {
-      bankName: bankName.endsWith('Bank') ? bankName : `${bankName} Bank`,
-      accountHolderName: accountHolder,
-      routingNumber: routingNumber,
-      accountNumber: rawAccountNumber,
-      accountLast4: accountLast4,
-      maskedAccountNumber: maskedAccountNumber
-    },
+    note: withdrawal.note || withdrawal.description || '',
+    bankName: bankInfo.bankName,
+    bankDetails: bankInfo,
+    bankAccount: bankInfo,
     actionDate: withdrawal.actionDate || null,
     actionDateFormatted: withdrawal.actionDate ? formatDateShort(withdrawal.actionDate) : null,
     rejectionReason: withdrawal.rejectionReason || ''

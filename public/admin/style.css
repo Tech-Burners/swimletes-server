@@ -1543,3 +1543,1014 @@ body {
   }
 }
 
+/* ==========================================================================
+   VERIFICATION QUEUE & REVIEW DRAWER (Figma 40012554:19239 & 20000)
+   ========================================================================== */
+
+/* Badges & Counter Pills */
+.tab-badge-amber {
+  background: #FEF3C7;
+  color: #D97706;
+}
+
+.badge-pending {
+  background: #FEF3C7;
+  border: 1px solid #FDE68A;
+  color: #B45309;
+}
+
+.badge-approved {
+  background: #DCFCE7;
+  border: 1px solid #BBF7D0;
+  color: #15803D;
+}
+
+.badge-rejected {
+  background: #FEE2E2;
+  border: 1px solid #FECACA;
+  color: #B91C1C;
+}
+
+.badge-certified {
+  background: #EFF6FF;
+  border: 1px solid #BFDBFE;
+  color: #1D4ED8;
+}
+
+.badge-exp {
+  background: #F5F3FF;
+  border: 1px solid #DDD6FE;
+  color: #6D28D9;
+}
+
+/* Table Customizations */
+.verification-table .col-instructor {
+  width: 25%;
+}
+
+.verification-table .col-type {
+  width: 15%;
+}
+
+.verification-table .col-credentials {
+  width: 30%;
+}
+
+.verification-table .col-date {
+  width: 14%;
+}
+
+.verification-table .col-status {
+  width: 10%;
+}
+
+.verification-table .col-actions {
+  width: 6%;
+}
+
+.credential-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+
+.cred-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  background: #F1F5F9;
+  color: #475569;
+  border: 1px solid #E2E8F0;
+  white-space: nowrap;
+}
+
+.cred-chip.cred-active {
+  background: #F0FDF4;
+  color: #166534;
+  border-color: #BBF7D0;
+}
+
+.cred-chip.cred-primary {
+  background: #EFF6FF;
+  color: #1D4ED8;
+  border-color: #BFDBFE;
+}
+
+.cred-chip-icon {
+  font-size: 10px;
+}
+
+.btn-review-verification {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30.75px;
+  padding: 5px 12px;
+  background: #0284C7;
+  border: 1px solid #0284C7;
+  border-radius: 6px;
+  font-family: var(--font-family);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #FFFFFF;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.btn-review-verification:hover {
+  background: #0369A1;
+  border-color: #0369A1;
+}
+
+/* Drawer Layout (Figma 40012554:20000) */
+.verification-drawer {
+  width: 480px;
+}
+
+.verification-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.drawer-type-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  height: 24px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.drawer-instructor-card {
+  background: #F8FAFC;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.instructor-card-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.instructor-card-avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 23px;
+  background: #0284C7;
+  color: #FFFFFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 15px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.instructor-card-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.instructor-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.instructor-card-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-dark);
+  margin: 0;
+  line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.instructor-card-email {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.instructor-card-phone {
+  font-size: 11.5px;
+  color: var(--text-sub);
+}
+
+.instructor-card-meta-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.meta-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.instructor-bio-box {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bio-text {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-slate);
+  margin: 0;
+}
+
+/* Credential Blocks */
+.credential-block {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.section-micro-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.qualification-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--bg-subtle);
+  color: var(--text-slate);
+}
+
+.credential-field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  padding: 4px 0;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.credential-field-row:last-child {
+  border-bottom: none;
+}
+
+.credential-field-label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.credential-field-val {
+  color: var(--text-dark);
+  font-weight: 600;
+}
+
+/* Document Attachment Card */
+.doc-attachment-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #F8FAFC;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 10px 12px;
+  margin-top: 6px;
+  transition: var(--transition-smooth);
+}
+
+.doc-attachment-card:hover {
+  background: #F1F5F9;
+  border-color: #CBD5E1;
+}
+
+.doc-card-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.doc-type-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: #EFF6FF;
+  color: #0284C7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.doc-text-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.doc-filename {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-dark);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.doc-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.btn-view-doc {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-slate);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: var(--transition-smooth);
+}
+
+.btn-view-doc:hover {
+  background: #0284C7;
+  color: #FFFFFF;
+  border-color: #0284C7;
+}
+
+.doc-thumb-preview {
+  width: 38px;
+  height: 38px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: var(--transition-smooth);
+}
+
+.doc-thumb-preview:hover {
+  transform: scale(1.05);
+}
+
+.credential-cards-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cred-subcard {
+  background: #F8FAFC;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cred-subcard-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dark);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Drawer Footer Buttons */
+.btn-drawer-reject {
+  flex: 1;
+  height: 38px;
+  padding: 8px 16px;
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+  border-radius: 7px;
+  font-family: var(--font-family);
+  font-size: 13px;
+  font-weight: 600;
+  color: #DC2626;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: var(--transition-smooth);
+}
+
+.btn-drawer-reject:hover {
+  background: #FEE2E2;
+  border-color: #F87171;
+}
+
+.btn-drawer-approve {
+  flex: 1;
+  height: 38px;
+  padding: 8px 16px;
+  background: #0284C7;
+  border: 1px solid #0284C7;
+  border-radius: 7px;
+  font-family: var(--font-family);
+  font-size: 13px;
+  font-weight: 600;
+  color: #FFFFFF;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: var(--transition-smooth);
+}
+
+.btn-drawer-approve:hover {
+  background: #0369A1;
+  border-color: #0369A1;
+}
+
+/* Rejection Modal */
+.rejection-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(4px);
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.rejection-modal-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-drawer);
+  width: 440px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: modalScaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalScaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.modal-card-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-dark);
+  margin: 0;
+}
+
+.modal-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.modal-card-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal-instruction-text {
+  font-size: 13px;
+  color: var(--text-slate);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.rejection-reasons-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.reason-preset-chip {
+  background: #F8FAFC;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  color: var(--text-slate);
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.reason-preset-chip:hover {
+  background: #EFF6FF;
+  border-color: #93C5FD;
+  color: #1D4ED8;
+}
+
+.rejection-textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: var(--font-family);
+  font-size: 13px;
+  color: var(--text-dark);
+  resize: vertical;
+  outline: none;
+}
+
+.rejection-textarea:focus {
+  border-color: #0284C7;
+}
+
+.modal-card-footer {
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  background: #F8FAFC;
+}
+
+.btn-modal-cancel {
+  height: 34px;
+  padding: 6px 14px;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--font-family);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.btn-modal-confirm-reject {
+  height: 34px;
+  padding: 6px 14px;
+  background: #DC2626;
+  border: 1px solid #DC2626;
+  border-radius: 6px;
+  font-family: var(--font-family);
+  font-size: 13px;
+  font-weight: 600;
+  color: #FFFFFF;
+  cursor: pointer;
+}
+
+.btn-modal-confirm-reject:hover {
+  background: #B91C1C;
+}
+
+/* ========================================================= */
+/* PROFILE SETTINGS & FEES CONFIGURATION (Figma 40012563:24404) */
+/* ========================================================= */
+
+.profile-settings-card {
+  display: flex;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  overflow: hidden;
+  min-height: 720px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.settings-sidebar-col {
+  width: 220px;
+  background: #FAFAFA;
+  border-right: 1px solid #E2E8F0;
+  padding: 16px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.settings-sidebar-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94A3B8;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  margin-bottom: 2px;
+}
+
+.settings-nav-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.settings-nav-btn:hover {
+  background: #F1F5F9;
+  color: #0F172A;
+}
+
+.settings-nav-btn.active {
+  background: #EFF8FF;
+  color: #0EA5E9;
+  font-weight: 600;
+}
+
+.settings-nav-btn.active svg {
+  stroke: #0EA5E9;
+}
+
+.settings-content-col {
+  flex: 1;
+  padding: 32px 36px;
+  min-width: 0;
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.fee-setting-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.fee-section-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0F172A;
+  margin: 0;
+  line-height: 27px;
+  letter-spacing: -0.02em;
+}
+
+.fee-section-desc {
+  font-size: 13.5px;
+  line-height: 21px;
+  color: #64748B;
+  margin: 4px 0 16px 0;
+  max-width: 975px;
+}
+
+.fee-field-row {
+  display: flex;
+  align-items: flex-start;
+  padding: 20px 0;
+  border-top: 1px solid #F1F5F9;
+  gap: 24px;
+}
+
+.fee-field-left {
+  width: 220px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.fee-field-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0F172A;
+  line-height: 21px;
+}
+
+.fee-field-helper {
+  font-size: 12.5px;
+  line-height: 18px;
+  color: #94A3B8;
+}
+
+.fee-field-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.fee-input-wrapper {
+  position: relative;
+  width: 140px;
+}
+
+.fee-number-input {
+  width: 100%;
+  height: 41px;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 7px;
+  padding: 9px 28px 9px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  color: #0F172A;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.fee-number-input:focus {
+  border-color: #33B4FD;
+  box-shadow: 0 0 0 2px rgba(51, 180, 253, 0.15);
+}
+
+.fee-input-adornment {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 13px;
+  color: #94A3B8;
+  pointer-events: none;
+}
+
+.fee-calc-example {
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 19px;
+  color: #0369A1;
+}
+
+.fee-calc-example strong {
+  font-weight: 700;
+  color: #0369A1;
+}
+
+.fee-last-changed-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+
+.fee-last-changed-text {
+  font-size: 13.5px;
+  line-height: 20px;
+  color: #94A3B8;
+}
+
+.btn-view-history {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: #33B4FD;
+  text-decoration: underline;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.btn-view-history:hover {
+  color: #0284C7;
+}
+
+.fee-save-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 24px 0 0 0;
+}
+
+.btn-save-fee {
+  height: 38px;
+  padding: 9px 22px;
+  background: #0284C7;
+  border: 1px solid #0284C7;
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #FFFFFF;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-save-fee:hover {
+  background: #0369A1;
+  border-color: #0369A1;
+}
+
+.btn-save-fee:disabled {
+  background: #E2E8F0;
+  border-color: #E2E8F0;
+  color: #94A3B8;
+  cursor: not-allowed;
+}
+
+.fee-sections-divider {
+  height: 2px;
+  background: #F1F5F9;
+  margin: 32px 0;
+  border: none;
+}
+
+.fee-text-input {
+  width: 100%;
+  max-width: 320px;
+  height: 38px;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 13.5px;
+  color: #334155;
+  outline: none;
+}
+
+/* ========================================================= */
+/* FEE AUDIT HISTORY MODAL (Figma 40012563:25010)            */
+/* ========================================================= */
+
+.fee-history-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1050;
+  backdrop-filter: blur(2px);
+}
+
+.fee-history-modal-card {
+  width: 460px;
+  max-width: 90vw;
+  background: #FFFFFF;
+  border-radius: 12px;
+  box-shadow: 0px 20px 48px 0px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  animation: modalSlideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.fee-history-modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #E2E8F0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fee-history-modal-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0F172A;
+  margin: 0;
+  line-height: 22px;
+}
+
+.fee-history-close-btn {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: #64748B;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fee-history-close-btn:hover {
+  background: #F1F5F9;
+  color: #0F172A;
+}
+
+.fee-history-modal-body {
+  padding: 8px 0;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.fee-history-item-row {
+  display: flex;
+  align-items: center;
+  padding: 14px 20px;
+  gap: 16px;
+  border-bottom: 1px solid #F1F5F9;
+  transition: background 0.15s ease;
+}
+
+.fee-history-item-row:last-child {
+  border-bottom: none;
+}
+
+.fee-history-item-row:hover {
+  background: #F8FAFC;
+}
+
+.fee-history-values-col {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.fee-history-val-old {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #64748B;
+}
+
+.fee-history-arrow-icon {
+  width: 14px;
+  height: 14px;
+  color: #33B4FD;
+}
+
+.fee-history-val-new {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #0F172A;
+}
+
+.fee-history-actor-col {
+  flex: 1;
+  font-size: 13px;
+  color: #475569;
+}
+
+.fee-history-actor-col strong {
+  font-weight: 700;
+  color: #0F172A;
+}
+
+.fee-history-date-col {
+  font-size: 12.5px;
+  color: #94A3B8;
+  flex-shrink: 0;
+}
+
+
+

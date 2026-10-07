@@ -26,7 +26,11 @@ const {
   getAdminInstructorDetailsService,
   getAdminInstructorReviewsService,
   updateInstructorStatusService,
-  getAdminDashboardOverviewService
+  getAdminDashboardOverviewService,
+  getAdminVerificationQueueService,
+  getAdminVerificationDetailsService,
+  adminApproveVerificationService,
+  adminRejectVerificationService
 } = require("./user.service");
 const response = require("../../helpers/response");
 
@@ -465,6 +469,62 @@ const getAdminDashboardOverviewController = catchAsync(async (req, res) => {
   );
 });
 
+// Admin Verification Queue List (Figma Node 40012554:19239)
+const getAdminVerificationsListController = catchAsync(async (req, res) => {
+  const result = await getAdminVerificationQueueService(req.query);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      type: 'AdminVerificationQueue',
+      message: 'Admin verification queue fetched successfully',
+      data: result
+    })
+  );
+});
+
+// Admin Verification Details Drawer (Figma Node 40012554:20000)
+const getAdminVerificationDetailsController = catchAsync(async (req, res) => {
+  const result = await getAdminVerificationDetailsService(req.params.id);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      type: 'AdminVerificationDetails',
+      message: 'Admin verification details fetched successfully',
+      data: result
+    })
+  );
+});
+
+// Admin Approve Verification (Figma Node 40012554:20000)
+const adminApproveVerificationController = catchAsync(async (req, res) => {
+  const result = await adminApproveVerificationService(req.params.id, req.body);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      type: 'AdminVerificationApprove',
+      message: 'Instructor verification approved successfully',
+      data: result
+    })
+  );
+});
+
+// Admin Reject Verification (Figma Node 40012554:20000)
+const adminRejectVerificationController = catchAsync(async (req, res) => {
+  const result = await adminRejectVerificationService(req.params.id, req.body);
+  return res.status(status.OK).json(
+    response({
+      status: 'OK',
+      statusCode: status.OK,
+      type: 'AdminVerificationReject',
+      message: 'Instructor verification application rejected',
+      data: result
+    })
+  );
+});
+
 module.exports = {
   suspendUserController,
   banUserController,
@@ -493,5 +553,9 @@ module.exports = {
   getAdminInstructorDetailsController,
   getAdminInstructorReviewsController,
   updateInstructorStatusController,
-  getAdminDashboardOverviewController
+  getAdminDashboardOverviewController,
+  getAdminVerificationsListController,
+  getAdminVerificationDetailsController,
+  adminApproveVerificationController,
+  adminRejectVerificationController
 };

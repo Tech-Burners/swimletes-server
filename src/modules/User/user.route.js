@@ -38,7 +38,11 @@ const {
   getAdminInstructorDetailsController,
   getAdminInstructorReviewsController,
   updateInstructorStatusController,
-  getAdminDashboardOverviewController
+  getAdminDashboardOverviewController,
+  getAdminVerificationsListController,
+  getAdminVerificationDetailsController,
+  adminApproveVerificationController,
+  adminRejectVerificationController
 } = require("./user.controller");
 const { updateProfile, userDetailsByID } = require('../Auth/auth.controller');
 const { getBankAccount, saveBankAccount, deleteBankAccount } = require('../Earnings/earnings.controller');
@@ -113,6 +117,13 @@ router.patch("/admin/instructors/:id/status", tokenCheck, updateInstructorStatus
 router.patch("/admin/instructors/:id/suspend", tokenCheck, suspendUserController);
 router.patch("/admin/instructors/:id/ban", tokenCheck, banUserController);
 router.patch("/admin/instructors/:id/active", tokenCheck, activeUserController);
+
+// ==================== Admin Verification Queue & Review Drawer (Figma Node 40012554:19239 & 40012554:20000) ====================
+router.get("/admin/verifications", tokenCheck, getAdminVerificationsListController);
+router.get("/admin/verification-queue", tokenCheck, getAdminVerificationsListController);
+router.get("/admin/verifications/:id", tokenCheck, getAdminVerificationDetailsController);
+router.patch("/admin/verifications/:id/approve", tokenCheck, adminApproveVerificationController);
+router.patch("/admin/verifications/:id/reject", tokenCheck, adminRejectVerificationController);
 
 // Direct Actions
 router.patch("/suspend/:id", suspendUserController);

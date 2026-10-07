@@ -1948,6 +1948,386 @@ const getAdminDashboardOverviewService = async (queryParams = {}) => {
   };
 };
 
+// Helpers for Admin Verification Services (Figma 40012554:19239 & 40012554:20000)
+const formatDocUrl = (url, fallbackName) => {
+  if (url && typeof url === 'string') {
+    return url.startsWith('http') || url.startsWith('/') ? url : `/uploads/users/${url}`;
+  }
+  if (fallbackName && typeof fallbackName === 'string') {
+    return `/uploads/users/${fallbackName}`;
+  }
+  return null;
+};
+
+const formatAvatarUrl = (img) => {
+  if (!img || typeof img !== 'string') return null;
+  const trimmed = img.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+  return `/uploads/users/${trimmed}`;
+};
+
+const getInitialsSafe = (name) => {
+  if (!name || typeof name !== 'string') return 'IN';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
+const formatTimeAgo = (date) => {
+  if (!date) return 'recently';
+  const past = new Date(date).getTime();
+  if (isNaN(past)) return 'recently';
+  const diffMs = Math.max(0, Date.now() - past);
+  const diffSeconds = Math.floor(diffMs / 1000);
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  const diffHours = Math.floor(diffMinutes / 60);
+  const diffDays = Math.floor(diffHours / 24);
+  const diffMonths = Math.floor(diffDays / 30);
+  const diffYears = Math.floor(diffDays / 365);
+
+  if (diffMinutes < 1) {
+    return 'just now';
+  }
+  if (diffMinutes < 60) {
+    return diffMinutes === 1 ? '1 minute ago' : `${diffMinutes} minutes ago`;
+  }
+  if (diffHours < 24) {
+    return diffHours === 1 ? '1 hour ago' : `${diffHours} hours ago`;
+  }
+  if (diffDays < 30) {
+    return diffDays === 1 ? '1 day ago' : `${diffDays} days ago`;
+  }
+  if (diffMonths < 12) {
+    return diffMonths === 1 ? '1 month ago' : `${diffMonths} months ago`;
+  }
+  return diffYears === 1 ? '1 year ago' : `${diffYears} years ago`;
+};
+
+const formatDisplayDate = (d) => {
+  if (!d) return 'N/A';
+  const parsed = new Date(d);
+  if (isNaN(parsed.getTime())) return 'N/A';
+  return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+};
+
+const maskIdNumber = (num) => {
+  if (!num || typeof num !== 'string') return '•••-••-••••';
+  const clean = num.trim();
+  if (clean.length <= 4) return clean;
+  return `•••-••-${clean.slice(-4)}`;
+};
+
+/**
+ * 10. Admin Verification Queue List (Figma Node 40012554:19239)
+ * Supports tabs: pending, approved, rejected, all
+ * Supports search, sorting, and pagination
+ */
+const getAdminVerificationQueueService = async (queryParams = {}) => {
+  const {
+    filter = 'pending',
+    search = '',
+    sortBy = 'submittedAt',
+    sortOrder = 'desc',
+    page = 1,
+    limit = 10
+  } = queryParams;
+
+  const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 10));
+  const skip = (pageNum - 1) * limitNum;
+
+  // Base instructor filter
+  const baseFilter = {
+    role: 'instructor',
+    isDeleted: false
+  };
+
+  // Tab counts
+  const [allCount, pendingCount, approvedCount, rejectedCount] = await Promise.all([
+    userModel.countDocuments(baseFilter),
+    userModel.countDocuments({
+      ...baseFilter,
+      $or: [
+        { status: 'pending' },
+        { isVerified: false, status: { $nin: ['rejected', 'banned', 'suspended'] } }
+      ]
+    }),
+    userModel.countDocuments({
+      ...baseFilter,
+      $or: [
+        { isVerified: true },
+        { status: 'active', isVerified: true }
+      ]
+    }),
+    userModel.countDocuments({
+      ...baseFilter,
+      $or: [
+        { status: 'rejected' },
+        { 'backgroundCheck.status': 'rejected' }
+      ]
+    })
+  ]);
+
+  // Tab filter query
+  const query = { ...baseFilter };
+  const normalizedFilter = (filter || '').toLowerCase();
+
+  if (normalizedFilter === 'pending') {
+    query.$or = [
+      { status: 'pending' },
+      { isVerified: false, status: { $nin: ['rejected', 'banned', 'suspended'] } }
+    ];
+  } else if (normalizedFilter === 'approved' || normalizedFilter === 'verified') {
+    query.$or = [
+      { isVerified: true },
+      { status: 'active', isVerified: true }
+    ];
+  } else if (normalizedFilter === 'rejected') {
+    query.$or = [
+      { status: 'rejected' },
+      { 'backgroundCheck.status': 'rejected' }
+    ];
+  }
+
+  // Search filter
+  if (search && search.trim()) {
+    const s = search.trim();
+    const searchRegex = { $regex: s, $options: 'i' };
+    const searchConditions = [
+      { fullName: searchRegex },
+      { email: searchRegex },
+      { 'certification.name': searchRegex },
+      { certifications: searchRegex },
+      { 'backgroundCheck.idNumber': searchRegex },
+      { 'backgroundCheck.idType': searchRegex },
+      { instructorType: searchRegex }
+    ];
+
+    if (query.$or) {
+      query.$and = [
+        { $or: query.$or },
+        { $or: searchConditions }
+      ];
+      delete query.$or;
+    } else {
+      query.$or = searchConditions;
+    }
+  }
+
+  // Fetch instructors matching filter and search
+  const totalFiltered = await userModel.countDocuments(query);
+  const rawDocs = await userModel.find(query).lean();
+
+  // Sorting rawDocs before pagination & mapping
+  rawDocs.sort((a, b) => {
+    let comparison = 0;
+    if (sortBy === 'name') {
+      comparison = (a.fullName || '').localeCompare(b.fullName || '');
+    } else if (sortBy === 'type') {
+      comparison = (a.instructorType || '').localeCompare(b.instructorType || '');
+    } else if (sortBy === 'status') {
+      comparison = (a.status || '').localeCompare(b.status || '');
+    } else {
+      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      comparison = dateA - dateB;
+    }
+    return sortOrder === 'asc' ? comparison : -comparison;
+  });
+
+  const paginatedDocs = rawDocs.slice(skip, skip + limitNum);
+
+  // Enrich items with only necessary fields
+  const paginatedList = paginatedDocs.map((doc) => {
+    let verificationStatus = 'pending';
+    if (doc.status === 'rejected' || doc.backgroundCheck?.status === 'rejected') {
+      verificationStatus = 'rejected';
+    } else if (doc.isVerified === true || (doc.status === 'active' && doc.isVerified)) {
+      verificationStatus = 'approved';
+    } else {
+      verificationStatus = 'pending';
+    }
+
+    return {
+      _id: doc._id,
+      fullName: doc.fullName || '',
+      email: doc.email || '',
+      image: formatAvatarUrl(doc.image),
+      instructorType: doc.instructorType || 'certified',
+      status: verificationStatus,
+      submittedAt: formatTimeAgo(doc.createdAt)
+    };
+  });
+
+  return {
+    counts: {
+      pending: pendingCount,
+      approved: approvedCount,
+      rejected: rejectedCount,
+      all: allCount
+    },
+    verifications: paginatedList,
+    pagination: {
+      totalResults: totalFiltered,
+      totalPages: Math.ceil(totalFiltered / limitNum) || 1,
+      currentPage: pageNum,
+      limit: limitNum
+    }
+  };
+};
+
+/**
+ * 11. Admin Verification Details Drawer (Figma Node 40012554:20000)
+ * Returns strictly the information displayed in the verification review drawer.
+ */
+const getAdminVerificationDetailsService = async (instructorId) => {
+  if (!mongoose.Types.ObjectId.isValid(instructorId)) {
+    throw new Error('Invalid instructor ID');
+  }
+
+  const doc = await userModel.findById(instructorId).lean();
+  if (!doc) {
+    throw new Error('Instructor application not found');
+  }
+
+  const isCert = (doc.instructorType || 'certified') === 'certified';
+  const primaryCert = doc.certification || {};
+  const cpr = doc.cprCertification || {};
+  const firstAid = doc.firstAidCertification || {};
+  const bg = doc.backgroundCheck || {};
+  const exp = doc.experience || {};
+  const waiver = doc.experienceWaiver || {};
+
+  const primaryCertUrl = formatDocUrl(primaryCert.fileUrl, primaryCert.fileName);
+  const cprUrl = formatDocUrl(cpr.fileUrl, cpr.fileName);
+  const firstAidUrl = formatDocUrl(firstAid.fileUrl, firstAid.fileName);
+  const bgUrl = formatDocUrl(bg.documentUrl, bg.documentName);
+
+  let verificationStatus = 'pending';
+  if (doc.status === 'rejected' || bg.status === 'rejected') {
+    verificationStatus = 'rejected';
+  } else if (doc.isVerified === true || (doc.status === 'active' && doc.isVerified)) {
+    verificationStatus = 'approved';
+  } else {
+    verificationStatus = 'pending';
+  }
+
+  return {
+    _id: doc._id,
+    fullName: doc.fullName || '',
+    image: formatAvatarUrl(doc.image),
+    submittedAt: `Submitted ${formatTimeAgo(doc.createdAt)}`,
+    status: verificationStatus,
+    instructorType: doc.instructorType || 'certified',
+    bio: doc.bio || doc.about || '',
+    primaryCertification: isCert ? {
+      name: primaryCert.name || doc.certifications || 'Water Safety Instructor (WSI)',
+      issuer: primaryCert.issuer || 'American Red Cross',
+      expiryDate: primaryCert.expiryDate || 'Expires Aug 2027',
+      fileName: primaryCert.fileName || (primaryCertUrl ? primaryCertUrl.split('/').pop() : 'WSI_Certification.pdf'),
+      fileUrl: primaryCertUrl
+    } : null,
+    experience: !isCert ? {
+      years: typeof exp.years === 'number' ? `${exp.years} years` : (doc.experienceYears ? `${doc.experienceYears} years` : '3 years'),
+      description: exp.description || doc.experienceDescription || '',
+      reference: {
+        name: exp.referenceName || doc.referenceName || 'N/A',
+        contact: exp.referenceContact || doc.referenceContact || 'N/A'
+      }
+    } : null,
+    cprCertification: {
+      name: cpr.name || 'CPR/AED Certification',
+      issuer: cpr.issuer || 'American Heart Association',
+      expiryDate: cpr.expiryDate || 'Expires Aug 2027',
+      fileName: cpr.fileName || (cprUrl ? cprUrl.split('/').pop() : 'CPR_AED_Certification.pdf'),
+      fileUrl: cprUrl
+    },
+    firstAidCertification: {
+      name: firstAid.name || 'First Aid Certification',
+      issuer: firstAid.issuer || 'American Red Cross',
+      expiryDate: firstAid.expiryDate || 'Expires Nov 2027',
+      fileName: firstAid.fileName || (firstAidUrl ? firstAidUrl.split('/').pop() : 'First_Aid_Certification.pdf'),
+      fileUrl: firstAidUrl
+    },
+    liabilityWaiver: !isCert ? {
+      fileName: waiver.fileName || 'Additional_Liability_Waiver.pdf',
+      fileUrl: waiver.fileUrl || (waiver.isAgreed || doc.isWaiverAgreed ? '/uploads/users/Additional_Liability_Waiver.pdf' : null),
+      signedBy: doc.fullName || 'Instructor',
+      signedAt: formatDisplayDate(waiver.agreedAt || doc.createdAt)
+    } : null,
+    backgroundCheck: {
+      idType: bg.idType || 'Social Security Number',
+      idNumber: maskIdNumber(bg.idNumber),
+      fileName: bg.documentName || (bgUrl ? bgUrl.split('/').pop() : 'SSN_Verification_Document.pdf'),
+      fileUrl: bgUrl,
+      isConsentConfirmed: bg.isConsentConfirmed !== false
+    }
+  };
+};
+
+/**
+ * 12. Admin Approve Verification (Figma Node 40012554:20000)
+ */
+const adminApproveVerificationService = async (instructorId, payload = {}) => {
+  if (!mongoose.Types.ObjectId.isValid(instructorId)) {
+    throw new Error('Invalid instructor ID');
+  }
+
+  const reason = payload.reason || 'Instructor credentials verified and approved by Administrator';
+
+  const updated = await userModel.findByIdAndUpdate(
+    instructorId,
+    {
+      $set: {
+        status: 'active',
+        isVerified: true,
+        'backgroundCheck.status': 'cleared',
+        statusReason: reason,
+        statusUpdatedAt: new Date()
+      }
+    },
+    { new: true }
+  ).select('fullName email status isVerified instructorType statusReason statusUpdatedAt');
+
+  if (!updated) {
+    throw new Error('Instructor application not found');
+  }
+
+  return updated;
+};
+
+/**
+ * 13. Admin Reject Verification (Figma Node 40012554:20000)
+ */
+const adminRejectVerificationService = async (instructorId, payload = {}) => {
+  if (!mongoose.Types.ObjectId.isValid(instructorId)) {
+    throw new Error('Invalid instructor ID');
+  }
+
+  const reason = payload.reason || 'Submitted application credentials did not pass verification criteria';
+
+  const updated = await userModel.findByIdAndUpdate(
+    instructorId,
+    {
+      $set: {
+        status: 'rejected',
+        isVerified: false,
+        'backgroundCheck.status': 'rejected',
+        statusReason: reason,
+        statusUpdatedAt: new Date()
+      }
+    },
+    { new: true }
+  ).select('fullName email status isVerified instructorType statusReason statusUpdatedAt');
+
+  if (!updated) {
+    throw new Error('Instructor application not found');
+  }
+
+  return updated;
+};
+
 module.exports = {
   suspendUserService,
   banUserService,
@@ -1975,5 +2355,9 @@ module.exports = {
   getAdminInstructorDetailsService,
   getAdminInstructorReviewsService,
   updateInstructorStatusService,
-  getAdminDashboardOverviewService
+  getAdminDashboardOverviewService,
+  getAdminVerificationQueueService,
+  getAdminVerificationDetailsService,
+  adminApproveVerificationService,
+  adminRejectVerificationService
 };

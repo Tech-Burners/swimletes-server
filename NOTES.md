@@ -29,14 +29,32 @@
 | `StaticContent` | `/api/v1/static-contents` | Terms of Service, Privacy Policy, About Us, FAQs | Active |
 | `Token` | Internal Helper | JWT token generation and verification logic | Active |
 | `User` | `/api/v1/user` | Base user profiles (swimmer/parent, instructor, admin), certifications (CPR, First Aid), background check status, geo-location (2dsphere), earnings & stats | Active |
+| `PlatformSetting` | `/api/v1/admin/settings/fees` | Platform fee percentage, instructor commission rate, and chronological audit history | Active (`platformSetting.model.js`) |
 
 ### 💡 Embedded Sub-Schemas & Integrations
 
 - **Swimmer Profile**: Managed within `src/modules/Booking/booking.model.js` (`swimmerSchema` - name, age, comfort level, medical/fears notes).
 - **Waiver Agreement**: Managed within `src/modules/Booking/booking.model.js` (`waiverAgreementSchema` - digital signature, legal name, relationship, agreement timestamp).
-- **Pools & Locations**: Defined in `src/modules/ServiceAndPricing/serviceAndPricing.model.js` (`publicPoolSchema`, `ownPool`, `travelToClient`) and snapshot in `Booking`.
+- **Client Booking Details Screen** (`40012239:1080`): `GET /api/v1/booking/:id` (accessible via MongoDB `_id` or human-readable `bookingId` e.g. `BK-88214`). Returns strictly real, database-driven values with zero artificial default strings or mockup placeholders:
+  - Top-level: `_id`, `bookingId`, `status`, `date`, `startTime`, `endTime`, `duration`, `lessonType`.
+  - `instructor`: `_id`, `fullName`, `image`, `email`, `number`, `rating`, `avgRating`, `totalReviews`, `chatId`.
+  - `client`: `_id`, `fullName`, `image`, `email`, `number`.
+  - `swimmer`: `name`, `age`, `comfortLevel`, `notes`, `bookedFor`.
+  - `lesson`: `type`, `duration`, `price`.
+  - `waiver`: `isSigned`, `legalName`, `signedDate`, `signerRelationship`, `waiverVersion`.
+  - `location`: `locationType`, `poolName`, `address`, `coordinates`.
+  - `pricing`: `lessonPrice`, `bookingFee`, `poolEntryFee`, `travelFee`, `discountAmount`, `totalAmount`.
+  - `payment`: `method`, `status`, `cardBrand`, `last4`, `paidAt`, `transactionId`, `receiptUrl`.
+  - `canCancel`, `cancellationWindow`, `cancelledBy`, `cancellationReason`, `refundAmount`, `cancelledAt`.
+  - `canChat`, `chatId`, `createdAt`, `updatedAt`.
+  Eliminates all hardcoded mockup strings, synthetic sentences, artificial button text defaults, and schema defaults. Strictly throws 404 if booking is not found.
 - **Disputes & Reports**: Handled directly in `src/modules/Report/` (`report.model.js`, `report.service.js`, `report.controller.js`, `report.route.js`) with routes mapped to `/api/v1/report`, `/api/v1/reports`, and `/api/v1/disputes`. Follows the codebase standard: text fields bundled in `data` (JSON string/object) with file attachments (`image`/`photo`) passed separately. Admin disputes query (`GET /api/v1/disputes/admin`) is strictly read-only and returns only the exact columns displayed in the Figma table (`40012554:20231` - `bookingId`, `client`, `instructor`, `date`, `status`, `reason`), with full details (`amount`, `details`, `photos`, `resolution`) returned via drawer API (`GET /api/v1/disputes/admin/:id` - `40012554:20832`). Mobile "Report an issue" sheet (`40012392:3369`) served at `/instructor` and Admin Disputes portal & drawer served at `/admin`.
 - **Admin Financial & Operations Portals (Figma)**:
+  - **Admin Profile Settings & Fees Configuration** (`40012563:24404`, `40012563:24707` & `40012563:25010`): Served at `/admin/profile` and `/admin#profile`. Provides settings tabs (Profile, Email, Password, Fees & Commission). Manages dynamic Platform Fee (client checkout surcharge, e.g. 5%) and Instructor Commission (payout deduction, e.g. 15%). Divided into 2 clean, separate APIs:
+    1. **API 1 (Page `40012563:24404`)**: `GET /api/v1/admin/settings/fees` strictly returns only the current configuration: `platformFee` (`percentage`, `lastChanged`) and `instructorCommission` (`percentage`, `lastChanged`) with zero bloat or static UI text.
+    2. **API 2 (Modal `40012563:24707` / `40012563:25010`)**: `GET /api/v1/admin/settings/fees/history?type=platform_fee|instructor_commission` strictly returns the chronological audit changes (`previousPercentage`, `newPercentage`, `changedBy`, `date`). Supports both query and path parameters (`/history/platform-fee`, `/history/instructor-commission`) or all history when queried without filter.
+    Actionable via `PATCH /api/v1/admin/settings/fees/platform-fee` and `PATCH /api/v1/admin/settings/fees/commission`.
+  - **Admin Verification Queue & Review Drawer** (`40012554:19239` & `40012554:20000`): Served at `/admin` and `/admin/verification`. `GET /api/v1/user/admin/verifications` is strictly clean and returns only table columns (`_id`, `fullName`, `email`, `image`, `instructorType`, `status`, `submittedAt` formatted as relative string e.g. `"2 days ago"`, plus tab counts and pagination), while `GET /api/v1/user/admin/verifications/:id` strictly returns only the fields shown on Figma drawer `40012554:20000` (`_id`, `fullName`, `image`, `submittedAt` as relative e.g. `"Submitted 2 days ago"`, `status`, `instructorType`, `bio`, `primaryCertification` [if certified], `experience` [if experience_based], `cprCertification`, `firstAidCertification`, `liabilityWaiver` [if experience_based], and `backgroundCheck` with masked ID `•••-••-1234` and consent status). Actionable via `PATCH .../approve` and `PATCH .../reject` with rejection feedback modal.
   - **Admin Pending Withdrawals** (`40012563:21572`): `GET /api/v1/earnings/admin/withdrawals/pending` (returns instructor user details, bank accounts, requested amount, available balance at request, and relative request timestamp). Actionable via `PATCH .../approve` or `PATCH .../reject`.
   - **Admin Withdrawal History** (`40012563:22328`): `GET /api/v1/earnings/admin/withdrawals/history` (includes completed/rejected timestamps and rejection reason tooltips).
   - **Admin Refund Ledger** (`40012554:21158`): `GET /api/v1/booking/admin/refunds` (tab counts for all, dispute, cancellation, manual; search & sorting) & `POST /api/v1/booking/admin/refunds/issue` (executes Stripe refund and logs manual refund).

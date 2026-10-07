@@ -14,12 +14,16 @@ const earningsRoutes = require('../modules/Earnings/earnings.route');
 
 const refundRoutes = require('../modules/Booking/refund.route');
 const webhookRoutes = require('../modules/Booking/webhook.route');
+const platformSettingRoutes = require('../modules/PlatformSetting/platformSetting.route');
 const { getAdminDashboardOverviewController } = require('../modules/User/user.controller');
 const { tokenCheck } = require('../middlewares/auth');
 
 const adminRoutes = express.Router();
 adminRoutes.get('/overview', tokenCheck, getAdminDashboardOverviewController);
 adminRoutes.get('/dashboard', tokenCheck, getAdminDashboardOverviewController);
+adminRoutes.use('/settings/fees', platformSettingRoutes);
+adminRoutes.use('/fees', platformSettingRoutes);
+adminRoutes.use('/settings', platformSettingRoutes);
 
 const moduleRoutes = [
   {
@@ -133,6 +137,14 @@ const moduleRoutes = [
   {
     path: '/admin',
     route: adminRoutes
+  },
+  {
+    path: '/settings',
+    route: platformSettingRoutes
+  },
+  {
+    path: '/fees',
+    route: platformSettingRoutes
   }
 ];
 

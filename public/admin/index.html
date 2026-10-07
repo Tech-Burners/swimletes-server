@@ -20,7 +20,7 @@
       <div class="brand-chip">
         <span class="pulse-dot"></span>
         <span class="brand-name">SWIMLETES ADMIN</span>
-        <span class="figma-sync-badge">Figma 40012554:20231 & 20832</span>
+        <span class="figma-sync-badge">Figma 40012554:19239, 20000, 20231 & 20832</span>
       </div>
     </div>
 
@@ -157,8 +157,8 @@
           <span class="nav-label">Earnings</span>
         </a>
 
-        <!-- Profile Settings -->
-        <a href="#profile" class="nav-item" data-route="profile">
+        <!-- Profile Settings (Figma 40012563:24404) -->
+        <a href="#profile" class="nav-item" id="navItemProfile" data-route="profile" onclick="switchRoute('profile'); return false;">
           <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
             <circle cx="12" cy="7" r="4"></circle>
@@ -375,6 +375,287 @@
 
       </main>
 
+      <!-- ============================================== -->
+      <!-- VERIFICATION QUEUE VIEW (Figma 40012554:19239) -->
+      <!-- ============================================== -->
+      <main class="page-body-container hidden" id="viewVerification">
+        
+        <!-- Filter Tabs & Search Bar Row -->
+        <div class="controls-toolbar">
+          
+          <!-- Filter Tabs -->
+          <div class="filter-tabs-group" id="verificationFilterTabs">
+            <button class="filter-tab-btn active" id="tabVerificationPending" onclick="setVerificationFilter('pending')">
+              <span>Pending</span>
+              <span class="tab-badge-pill tab-badge-amber" id="countVerificationPending">0</span>
+            </button>
+            <button class="filter-tab-btn" id="tabVerificationApproved" onclick="setVerificationFilter('approved')">
+              <span>Approved</span>
+              <span class="tab-badge-pill tab-badge-gray" id="countVerificationApproved">0</span>
+            </button>
+            <button class="filter-tab-btn" id="tabVerificationRejected" onclick="setVerificationFilter('rejected')">
+              <span>Rejected</span>
+              <span class="tab-badge-pill tab-badge-gray" id="countVerificationRejected">0</span>
+            </button>
+            <button class="filter-tab-btn" id="tabVerificationAll" onclick="setVerificationFilter('all')">
+              <span>All</span>
+              <span class="tab-badge-pill tab-badge-gray" id="countVerificationAll">0</span>
+            </button>
+          </div>
+
+          <!-- Search Input -->
+          <div class="search-input-wrap">
+            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input
+              type="text"
+              id="verificationSearchInput"
+              class="search-text-field"
+              placeholder="Search instructor, email, cert, ID…"
+              oninput="handleVerificationSearch(event)"
+            />
+          </div>
+
+        </div>
+
+        <!-- Table Card Container (Figma 40012554:19239) -->
+        <div class="table-card">
+          <div class="table-responsive-wrapper">
+            <table class="disputes-table verification-table" id="verificationTable">
+              <thead>
+                <tr>
+                  <th class="col-instructor">APPLICANT</th>
+                  <th class="col-type">TYPE</th>
+                  <th class="col-date sortable" onclick="toggleVerificationDateSort()">
+                    <div class="th-content">
+                      <span>SUBMITTED</span>
+                      <svg class="sort-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="7 15 12 20 17 15"></polyline>
+                        <polyline points="7 9 12 4 17 9"></polyline>
+                      </svg>
+                    </div>
+                  </th>
+                  <th class="col-status">STATUS</th>
+                  <th class="col-actions">ACTIONS</th>
+                </tr>
+              </thead>
+              <tbody id="verificationTableBody">
+                <tr class="loading-row">
+                  <td colspan="5" class="loading-cell">
+                    <div class="table-spinner"></div>
+                    <span>Loading verification queue…</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Empty State -->
+          <div class="empty-state-card hidden" id="verificationEmptyState">
+            <div class="empty-icon-circle">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                <polyline points="9 12 11 14 15 10"></polyline>
+              </svg>
+            </div>
+            <h4 class="empty-title">No applications found</h4>
+            <p class="empty-desc">No instructor applications match the selected filter or search criteria.</p>
+          </div>
+        </div>
+
+      </main>
+
+      <!-- ============================================== -->
+      <!-- PROFILE SETTINGS VIEW (Figma 40012563:24404)    -->
+      <!-- ============================================== -->
+      <main class="page-body-container hidden" id="viewProfileSettings">
+        <div class="profile-settings-card">
+          
+          <!-- Left Settings Tabs Column -->
+          <div class="settings-sidebar-col">
+            <div class="settings-sidebar-title">SETTINGS</div>
+            <div class="settings-nav-items">
+              <button type="button" class="settings-nav-btn" id="settingsTabProfile" onclick="switchSettingsTab('profile')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+                <span>Profile</span>
+              </button>
+              <button type="button" class="settings-nav-btn" id="settingsTabEmail" onclick="switchSettingsTab('email')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                  <polyline points="22,6 12,13 2,6"></polyline>
+                </svg>
+                <span>Email Address</span>
+              </button>
+              <button type="button" class="settings-nav-btn" id="settingsTabPassword" onclick="switchSettingsTab('password')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+                <span>Password</span>
+              </button>
+              <button type="button" class="settings-nav-btn active" id="settingsTabFees" onclick="switchSettingsTab('fees')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="19" y1="5" x2="5" y2="19"></line>
+                  <circle cx="6.5" cy="6.5" r="2.5"></circle>
+                  <circle cx="17.5" cy="17.5" r="2.5"></circle>
+                </svg>
+                <span>Fees & Commission</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Right Content Column -->
+          <div class="settings-content-col">
+
+            <!-- Panel 1: Fees & Commission (Figma 40012563:24404) -->
+            <div class="settings-panel" id="settingsPanelFees">
+              
+              <!-- Section 1: Platform Fee -->
+              <div class="fee-setting-section">
+                <h2 class="fee-section-title">Platform Fee</h2>
+                <p class="fee-section-desc">
+                  The percentage fee added on top of the lesson price and charged to the client at checkout. This is separate from the instructor commission rate below.
+                </p>
+
+                <div class="fee-field-row">
+                  <div class="fee-field-left">
+                    <label class="fee-field-label" for="inputPlatformFee">Fee percentage</label>
+                    <span class="fee-field-helper">Enter a value between 0 and 100</span>
+                  </div>
+                  <div class="fee-field-right">
+                    <div class="fee-input-wrapper">
+                      <input type="number" id="inputPlatformFee" class="fee-number-input" min="0" max="100" step="0.5" value="5" oninput="onPlatformFeeInputChange()" />
+                      <span class="fee-input-adornment">%</span>
+                    </div>
+                    <div class="fee-calc-example" id="platformFeeCalcExample">
+                      Example: a $60 lesson becomes <strong>$63.00</strong> for the client at 5%.
+                    </div>
+                  </div>
+                </div>
+
+                <div class="fee-field-row">
+                  <div class="fee-field-left">
+                    <span class="fee-field-label">Last changed</span>
+                  </div>
+                  <div class="fee-field-right fee-last-changed-row">
+                    <span class="fee-last-changed-text" id="platformFeeLastChangedText">Last changed: Aug 7, 2026</span>
+                    <button type="button" class="btn-view-history" onclick="openFeeHistoryModal('platform_fee')">View History</button>
+                  </div>
+                </div>
+
+                <div class="fee-save-row">
+                  <button type="button" class="btn-save-fee" id="btnSavePlatformFee" onclick="savePlatformFee()">Save fee</button>
+                </div>
+              </div>
+
+              <!-- Horizontal Section Divider -->
+              <div class="fee-sections-divider"></div>
+
+              <!-- Section 2: Instructor Commission -->
+              <div class="fee-setting-section">
+                <h2 class="fee-section-title">Instructor Commission</h2>
+                <p class="fee-section-desc">
+                  The percentage deducted from the instructor's payout for every completed booking. This is separate from the platform fee above, which is charged to the client instead.
+                </p>
+
+                <div class="fee-field-row">
+                  <div class="fee-field-left">
+                    <label class="fee-field-label" for="inputCommission">Commission percentage</label>
+                    <span class="fee-field-helper">Enter a value between 0 and 100</span>
+                  </div>
+                  <div class="fee-field-right">
+                    <div class="fee-input-wrapper">
+                      <input type="number" id="inputCommission" class="fee-number-input" min="0" max="100" step="0.5" value="15" oninput="onCommissionInputChange()" />
+                      <span class="fee-input-adornment">%</span>
+                    </div>
+                    <div class="fee-calc-example" id="commissionCalcExample">
+                      Example: a $60 lesson pays the instructor <strong>$51.00</strong> at 15% commission.
+                    </div>
+                  </div>
+                </div>
+
+                <div class="fee-field-row">
+                  <div class="fee-field-left">
+                    <span class="fee-field-label">Last changed</span>
+                  </div>
+                  <div class="fee-field-right fee-last-changed-row">
+                    <span class="fee-last-changed-text" id="commissionLastChangedText">Last changed: Jul 10, 2026</span>
+                    <button type="button" class="btn-view-history" onclick="openFeeHistoryModal('instructor_commission')">View History</button>
+                  </div>
+                </div>
+
+                <div class="fee-save-row">
+                  <button type="button" class="btn-save-fee" id="btnSaveCommission" onclick="saveInstructorCommission()">Save commission</button>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Panel 2: Profile Settings (Auxiliary Tab) -->
+            <div class="settings-panel hidden" id="settingsPanelProfile">
+              <div class="fee-setting-section">
+                <h2 class="fee-section-title">Admin Profile</h2>
+                <p class="fee-section-desc">Manage your administrator account details.</p>
+                <div class="fee-field-row">
+                  <div class="fee-field-left">
+                    <label class="fee-field-label">Full Name</label>
+                  </div>
+                  <div class="fee-field-right">
+                    <input type="text" class="fee-text-input" value="Samantha Archer" readonly />
+                  </div>
+                </div>
+                <div class="fee-field-row">
+                  <div class="fee-field-left">
+                    <label class="fee-field-label">Role</label>
+                  </div>
+                  <div class="fee-field-right">
+                    <span class="user-role-badge">Administrator</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Panel 3: Email Address (Auxiliary Tab) -->
+            <div class="settings-panel hidden" id="settingsPanelEmail">
+              <div class="fee-setting-section">
+                <h2 class="fee-section-title">Email Address</h2>
+                <p class="fee-section-desc">Primary contact address for administrator alerts and communications.</p>
+                <div class="fee-field-row">
+                  <div class="fee-field-left">
+                    <label class="fee-field-label">Current Email</label>
+                  </div>
+                  <div class="fee-field-right">
+                    <input type="email" class="fee-text-input" value="samantha@swimletes.com" readonly />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Panel 4: Password (Auxiliary Tab) -->
+            <div class="settings-panel hidden" id="settingsPanelPassword">
+              <div class="fee-setting-section">
+                <h2 class="fee-section-title">Password & Security</h2>
+                <p class="fee-section-desc">Ensure your administrator account uses a strong password.</p>
+                <div class="fee-field-row">
+                  <div class="fee-field-left">
+                    <label class="fee-field-label">Security Status</label>
+                  </div>
+                  <div class="fee-field-right">
+                    <span style="font-size: 13px; color: #16A34A; font-weight: 500;">✓ Two-factor protection active</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </main>
+
     </div>
 
     <!-- ============================================== -->
@@ -503,6 +784,170 @@
 
     </aside>
 
+    <!-- ============================================== -->
+    <!-- VERIFICATION REVIEW DRAWER (Figma 40012554:20000) -->
+    <!-- ============================================== -->
+    <aside class="dispute-drawer verification-drawer hidden" id="verificationDrawer">
+      
+      <!-- Drawer Header -->
+      <div class="drawer-header">
+        <h3 class="drawer-title" id="verificationDrawerTitle">Verification: Application</h3>
+        <button class="drawer-close-btn" onclick="closeVerificationDrawer()" title="Close details">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Drawer Scrollable Content -->
+      <div class="drawer-body">
+        
+        <!-- Applicant Profile Header (Figma 40012554:20000) -->
+        <div class="drawer-applicant-header" style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0 10px 0; border-bottom: 1px solid var(--border);">
+          <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+            <div class="instructor-card-avatar avatar-blue" id="verificationDrawerAvatar" style="width: 44px; height: 44px; border-radius: 22px; flex-shrink: 0;">
+              <span>IN</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+              <h4 class="instructor-card-name" id="verificationDrawerName" style="font-size: 15px; font-weight: 600; color: #0F172A; margin: 0;">Instructor Name</h4>
+              <span id="verificationDrawerSubmitted" style="font-size: 12px; color: #94A3B8;">Submitted recently</span>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0;">
+            <span class="drawer-status-badge badge-pending" id="verificationDrawerStatusBadge">Pending</span>
+            <span class="drawer-type-badge badge-certified" id="verificationDrawerTypeBadge">Certified</span>
+          </div>
+        </div>
+
+        <!-- Bio Section (Figma 40012554:20000) -->
+        <div class="drawer-section credential-block" id="verificationDrawerBioBox" style="margin-top: 10px;">
+          <div class="section-micro-label" style="font-size: 11px; font-weight: 700; color: #94A3B8; text-transform: uppercase; letter-spacing: 0.05em;">Bio</div>
+          <p class="bio-text" id="verificationDrawerBio" style="font-size: 13px; line-height: 1.6; color: #475569; margin: 6px 0 0 0; background: #F8FAFC; border: 1px solid #E2E8F0; padding: 10px 12px; border-radius: 7px;">No bio submitted.</p>
+        </div>
+
+        <!-- Credential 1: Primary Qualification (Certified or Experience) -->
+        <div class="drawer-section credential-block" id="verificationPrimarySection">
+          <div class="section-micro-header">
+            <span class="section-micro-label" id="verificationPrimarySectionTitle">PRIMARY QUALIFICATION</span>
+            <span class="qualification-tag" id="verificationPrimaryTag">Certified</span>
+          </div>
+          <div id="verificationPrimaryContent">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+
+        <!-- Credential 2: Life Safety & First Aid -->
+        <div class="drawer-section credential-block">
+          <div class="section-micro-header">
+            <span class="section-micro-label">LIFE SAFETY & FIRST AID</span>
+          </div>
+          <div class="credential-cards-stack" id="verificationLifeSafetyContent">
+            <!-- CPR & First Aid cards populated dynamically -->
+          </div>
+        </div>
+
+        <!-- Credential 3: Additional Liability Waiver (Experience-Based) -->
+        <div class="drawer-section credential-block hidden" id="verificationWaiverSection">
+          <div class="section-micro-header">
+            <span class="section-micro-label">ADDITIONAL LIABILITY WAIVER</span>
+          </div>
+          <div id="verificationWaiverContent">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+
+        <!-- Credential 4: Background Check & Identity Verification -->
+        <div class="drawer-section credential-block">
+          <div class="section-micro-header">
+            <span class="section-micro-label">BACKGROUND CHECK</span>
+            <span class="qualification-tag" id="verificationBgStatusTag">Pending</span>
+          </div>
+          <div id="verificationBgContent">
+            <!-- Background check details & ID doc preview -->
+          </div>
+        </div>
+
+        <!-- Decision History (if already reviewed) -->
+        <div class="drawer-section hidden" id="verificationDecisionSection">
+          <div class="section-micro-label">DECISION HISTORY</div>
+          <div class="decision-history-box" id="verificationDecisionBox">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Drawer Action Buttons Footer -->
+      <div class="drawer-footer" id="verificationDrawerFooter">
+        <button class="btn-drawer-reject" id="btnVerificationReject" onclick="openRejectionModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+          <span>Reject</span>
+        </button>
+        <button class="btn-drawer-approve" id="btnVerificationApprove" onclick="approveCurrentVerification()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+          <span>Approve & Verify</span>
+        </button>
+      </div>
+
+    </aside>
+
+  </div>
+
+  <!-- Fee & Commission Audit History Modal (Figma 40012563:25010) -->
+  <div class="fee-history-modal-backdrop hidden" id="feeHistoryModalBackdrop" onclick="closeFeeHistoryModal()">
+    <div class="fee-history-modal-card" onclick="event.stopPropagation()">
+      <div class="fee-history-modal-header">
+        <h3 class="fee-history-modal-title" id="feeHistoryModalTitle">Platform Fee History</h3>
+        <button type="button" class="fee-history-close-btn" onclick="closeFeeHistoryModal()" title="Close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="fee-history-modal-body" id="feeHistoryItemsList">
+        <!-- Populated dynamically by app.js -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Rejection Reason Modal -->
+  <div class="rejection-modal-backdrop hidden" id="rejectionModalBackdrop" onclick="closeRejectionModal(event)">
+    <div class="rejection-modal-card" onclick="event.stopPropagation()">
+      <div class="modal-card-header">
+        <h3 class="modal-card-title">Reject Instructor Application</h3>
+        <button class="modal-close-btn" onclick="closeRejectionModal()">✕</button>
+      </div>
+      <div class="modal-card-body">
+        <p class="modal-instruction-text">
+          Please select or enter the reason for rejecting this verification application:
+        </p>
+        <div class="rejection-reasons-chips">
+          <button type="button" class="reason-preset-chip" onclick="setRejectionPreset('Invalid or expired certification document')">Expired Certification</button>
+          <button type="button" class="reason-preset-chip" onclick="setRejectionPreset('CPR/First Aid certification illegible or unverified')">CPR Issue</button>
+          <button type="button" class="reason-preset-chip" onclick="setRejectionPreset('Identity document does not match account legal name')">Identity Mismatch</button>
+          <button type="button" class="reason-preset-chip" onclick="setRejectionPreset('Background check verification requirements not met')">Background Check Issue</button>
+        </div>
+        <textarea
+          id="rejectionReasonInput"
+          class="rejection-textarea"
+          placeholder="Enter specific feedback or reason for rejection…"
+          rows="3"
+        ></textarea>
+      </div>
+      <div class="modal-card-footer">
+        <button class="btn-modal-cancel" onclick="closeRejectionModal()">Cancel</button>
+        <button class="btn-modal-confirm-reject" id="btnConfirmReject" onclick="confirmRejectVerification()">
+          Confirm Rejection
+        </button>
+      </div>
+    </div>
   </div>
 
   <!-- Fullscreen Image Lightbox Modal -->

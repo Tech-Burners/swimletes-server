@@ -115,8 +115,22 @@ app.get("/instructor", (req, res) => {
   res.sendFile(path.join(__dirname, "../public/instructor/index.html"));
 });
 
-// Admin UI Pages - Overview & Disputes (Figma 40012554:15436, 40012554:20231 & 40012554:20832)
-app.get(["/admin", "/admin/overview", "/admin/dashboard", "/admin/disputes", "/admin/disputes/*"], (req, res) => {
+// Admin UI Pages - Overview, Verification & Disputes (Figma 40012554:15436, 40012554:19239, 40012554:20000, 40012554:20231 & 40012554:20832)
+app.get([
+  "/admin",
+  "/admin/overview",
+  "/admin/dashboard",
+  "/admin/verification",
+  "/admin/verification/*",
+  "/admin/verifications",
+  "/admin/verifications/*",
+  "/admin/disputes",
+  "/admin/disputes/*",
+  "/admin/profile",
+  "/admin/profile/*",
+  "/admin/settings",
+  "/admin/settings/*"
+], (req, res) => {
   res.sendFile(path.join(__dirname, "../public/admin/index.html"));
 });
 
