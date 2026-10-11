@@ -69,6 +69,14 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: '',
   },
+  teaches: {
+    type: [String],
+    default: ['Kids 5-12', 'Teens', 'Adult']
+  },
+  speaks: {
+    type: [String],
+    default: ['English', 'Spanish']
+  },
   experience: {
     years: {
       type: Number,

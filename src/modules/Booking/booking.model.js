@@ -90,6 +90,10 @@ const bookingLocationSchema = new mongoose.Schema(
       type: String,
       required: true // e.g. "3418 Cedar Springs Rd"
     },
+    poolDetails: {
+      type: String,
+      default: '' // e.g. "Indoor, heated to 86°F · Free parking on site"
+    },
     location: {
       type: {
         type: String,

@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 const Booking = require('./booking.model');
 const User = require('../User/user.model');
+const Review = require('../Review/review.model');
+const Chat = require('../Chat/chat.model');
 const ApiError = require('../../helpers/ApiError');
 const { status: httpStatus } = require('http-status');
 const stripeHelper = require('../../helpers/stripe');
@@ -1468,26 +1470,96 @@ const formatMemberDuration = (createdAt) => {
   return `${Math.max(1, diffDays)}d`;
 };
 
+const daysOfWeekShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const formatFigmaBookingDate = (date, startTime) => {
+  if (!date) return startTime || '';
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return startTime || '';
+  const dayName = daysOfWeekShort[d.getDay()];
+  const monthName = monthsShort[d.getMonth()];
+  const dayNum = d.getDate();
+  const timeStr = startTime ? ` · ${startTime}` : '';
+  return `${dayName}, ${monthName} ${dayNum}${timeStr}`;
+};
+
+const formatRelativeDays = (date) => {
+  if (!date) return '';
+  const now = new Date();
+  const target = new Date(date);
+  if (isNaN(target.getTime())) return '';
+  const diffMs = new Date(target.getFullYear(), target.getMonth(), target.getDate()).getTime() -
+    new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const diffDays = Math.round(diffMs / (24 * 60 * 60 * 1000));
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Tomorrow';
+  if (diffDays === -1) return 'Yesterday';
+  if (diffDays > 1) return `In ${diffDays} days`;
+  return `${Math.abs(diffDays)} days ago`;
+};
+
+const formatDateShort = (date) => {
+  if (!date) return '';
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return '';
+  return `${monthsShort[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+};
+
+const formatComfortLevelDisplay = (level) => {
+  if (!level) return '';
+  switch (level) {
+    case 'never_been_in_water':
+      return 'Never been in water';
+    case 'nervous_beginner':
+      return 'Nervous Beginner';
+    case 'can_float_paddle':
+      return 'Can float & paddle';
+    case 'swims_confidently':
+      return 'Swims Confidently';
+    default:
+      return String(level).split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  }
+};
+
+const formatCancellationCutoff = (date, startTime) => {
+  if (!date) return 'Free to change or cancel until 24 hours prior.';
+  try {
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return 'Free to change or cancel until 24 hours prior.';
+    const cutoff = new Date(d.getTime() - 24 * 60 * 60 * 1000);
+    const dayName = daysOfWeekShort[cutoff.getDay()];
+    const monthName = monthsShort[cutoff.getMonth()];
+    const dayNum = cutoff.getDate();
+    const timeStr = startTime || '10:00 AM';
+    return `Free to change or cancel until ${dayName}, ${monthName} ${dayNum} at ${timeStr}.`;
+  } catch (e) {
+    return 'Free to change or cancel until 24 hours prior.';
+  }
+};
+
 /**
- * Get Booking Details by ID (Clean database data, matching Figma 40012321:3120, no unnecessary internal fields)
+ * Get Booking Details by ID (Clean database data, custom response based on role matching Figma User View 40012606:5436 / 40012239:1080 and Instructor View 40012368:2829)
  */
-const getBookingByIdService = async (bookingId, userId, userRole) => {
+const getBookingByIdService = async (bookingId, userId, requestedRole, queryParams = {}) => {
   let booking = null;
+
+  const populateInstructorFields = 'fullName email image number bio about address certifications certification cprCertification firstAidCertification backgroundCheck isVerified teaches speaks experience lessonsTaught avgRating totalReviews ratingCount';
+  const populateClientFields = 'fullName email image number address createdAt avgRating totalReviews ratingCount';
 
   if (mongoose.Types.ObjectId.isValid(bookingId)) {
     booking = await Booking.findById(bookingId)
-      .populate('client', 'fullName email image number address createdAt avgRating totalReviews ratingCount')
-      .populate('instructor', 'fullName email image number bio address certifications avgRating totalReviews ratingCount')
+      .populate('client', populateClientFields)
+      .populate('instructor', populateInstructorFields)
       .populate('clientReview')
       .populate('instructorReview')
       .populate('chat', '_id');
   }
 
   if (!booking) {
-    // Try finding by bookingId reference string (e.g. "SW-133727" or "BK-88214")
     booking = await Booking.findOne({ bookingId })
-      .populate('client', 'fullName email image number address createdAt avgRating totalReviews ratingCount')
-      .populate('instructor', 'fullName email image number bio address certifications avgRating totalReviews ratingCount')
+      .populate('client', populateClientFields)
+      .populate('instructor', populateInstructorFields)
       .populate('clientReview')
       .populate('instructorReview')
       .populate('chat', '_id');
@@ -1535,10 +1607,22 @@ const getBookingByIdService = async (bookingId, userId, userRole) => {
 
   const isClient = booking.client && booking.client._id && userId && booking.client._id.toString() === userId.toString();
   const isInstructor = booking.instructor && booking.instructor._id && userId && booking.instructor._id.toString() === userId.toString();
-  const isAdmin = userRole === 'admin';
+  const isAdmin = requestedRole === 'admin';
 
   if (userId && !isClient && !isInstructor && !isAdmin) {
     throw new ApiError(httpStatus.FORBIDDEN, 'You are not authorized to view this booking');
+  }
+
+  // Determine effective view role:
+  // Explicit requestedRole ('instructor', 'user', 'admin') takes precedence (from query ?view= or ?role=),
+  // otherwise fallback to authenticated role or user ownership.
+  let effectiveRole = 'user';
+  if (requestedRole === 'instructor' || requestedRole === 'user' || requestedRole === 'admin') {
+    effectiveRole = requestedRole;
+  } else if (isInstructor) {
+    effectiveRole = 'instructor';
+  } else if (isClient) {
+    effectiveRole = 'user';
   }
 
   const b = booking.toObject ? booking.toObject() : booking;
@@ -1546,113 +1630,467 @@ const getBookingByIdService = async (bookingId, userId, userRole) => {
   const instructorUser = b.instructor || null;
   const clientUser = b.client || null;
 
-  return {
+  // Fallback to query reviews if not already populated on booking document
+  const Review = require('../Review/review.model');
+  let clientRev = b.clientReview || null;
+  let instructorRev = b.instructorReview || null;
+
+  if (!clientRev || !instructorRev) {
+    try {
+      const dbReviews = await Review.find({ booking: b._id });
+      if (!clientRev) {
+        clientRev = dbReviews.find(r => r.reviewerRole === 'user') || null;
+      }
+      if (!instructorRev) {
+        instructorRev = dbReviews.find(r => r.reviewerRole === 'instructor') || null;
+      }
+    } catch (e) {
+      // continue cleanly
+    }
+  }
+
+  // Client stats for Instructor View (Booked by card in Figma 40012368:2829)
+  const clientStats = {
+    lessonsBooked: 0,
+    cancels: 0,
+    memberSince: '',
+    memberText: 'New Member'
+  };
+
+  if (clientUser && clientUser._id) {
+    try {
+      const [bookedCount, cancelCount] = await Promise.all([
+        Booking.countDocuments({ client: clientUser._id, status: { $ne: 'pending_payment' } }),
+        Booking.countDocuments({ client: clientUser._id, status: 'cancelled' })
+      ]);
+      clientStats.lessonsBooked = bookedCount || 0;
+      clientStats.cancels = cancelCount || 0;
+
+      if (clientUser.createdAt) {
+        const createdDate = new Date(clientUser.createdAt);
+        clientStats.memberSince = createdDate.getFullYear().toString();
+        const diffYears = Math.floor((Date.now() - createdDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+        clientStats.memberText = diffYears >= 1 ? `${diffYears}y Member` : 'New Member';
+      }
+    } catch (e) {
+      // continue cleanly
+    }
+  }
+
+  const instructorFirstName = instructorUser?.fullName ? instructorUser.fullName.split(' ')[0] : 'Instructor';
+  const clientFirstName = clientUser?.fullName ? clientUser.fullName.split(' ')[0] : 'Client';
+  const poolEntryFeeVal = b.pricing?.poolEntryFee ?? 0;
+  const poolName = b.location?.poolName || '';
+  const address = b.location?.address || '';
+  const poolDetails = b.location?.poolDetails || 'Indoor, heated to 86°F · Free parking on site';
+  const fullAddressWithDetails = poolDetails ? `${address} · ${poolDetails}` : address;
+  const directionsUrl = address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}` : '';
+  const bookingDateShort = b.date ? `${monthsShort[new Date(b.date).getMonth()]} ${new Date(b.date).getDate()}` : 'lesson date';
+  const entryFeeAlert = poolEntryFeeVal > 0 ? `You paid $${poolEntryFeeVal.toFixed(2)} for ${instructorFirstName}'s entry. Confirmed lessons are allowed here on ${bookingDateShort}.` : '';
+
+  const locationData = {
+    locationType: b.location?.locationType || 'public_pool',
+    locationTypeDisplay: b.location?.locationType === 'public_pool' ? 'PUBLIC POOL' : (b.location?.locationType === 'instructor_pool' ? "INSTRUCTOR'S POOL" : "CLIENT'S POOL"),
+    poolName,
+    address,
+    poolDetails,
+    fullAddress: fullAddressWithDetails,
+    coordinates: (b.location?.location?.coordinates && b.location.location.coordinates.length === 2)
+      ? b.location.location.coordinates
+      : [],
+    mapImage: '/uploads/pools/pool-map-placeholder.png',
+    directionsUrl,
+    entryFeeAlert
+  };
+
+  const theirReview = clientRev ? {
+    _id: clientRev._id,
+    rating: clientRev.rating,
+    ratingText: `${clientRev.rating} out of 5`,
+    comment: clientRev.comment || '',
+    tags: clientRev.tags || [],
+    date: clientRev.createdAt,
+    dateFormatted: formatDateShort(clientRev.createdAt),
+    reviewerName: clientUser?.fullName || 'Client'
+  } : null;
+
+  const yourRating = instructorRev ? {
+    _id: instructorRev._id,
+    rating: instructorRev.rating,
+    ratingText: `${instructorRev.rating} out of 5`,
+    comment: instructorRev.comment || '',
+    tags: instructorRev.tags || [],
+    date: instructorRev.createdAt,
+    dateFormatted: formatDateShort(instructorRev.createdAt),
+    canEditReview: true
+  } : null;
+
+  const getStatusDisplay = (st) => {
+    switch (st) {
+      case 'accepted': return 'Confirmed';
+      case 'completed': return 'Completed';
+      case 'active': return 'In Progress';
+      case 'pending': return 'Pending';
+      case 'cancelled': return 'Cancelled';
+      case 'declined': return 'Declined';
+      default: return st ? st.charAt(0).toUpperCase() + st.slice(1) : '';
+    }
+  };
+
+  const isReviewedByCurrentUser = isClient ? Boolean(clientRev) : (isInstructor ? Boolean(instructorRev) : false);
+
+  const instructorEarningsVal = b.pricing?.instructorEarnings ?? 0;
+  const isPaidOut = b.status === 'completed';
+  const payoutDate = b.payment?.paidAt || b.completedAt || b.updatedAt;
+
+  // 1. Instructor-specific View Payload (Figma 40012368:2829)
+  const instructorViewData = {
+    roleView: 'instructor',
     _id: b._id,
     bookingId: b.bookingId || null,
     status: b.status,
+    statusDisplay: getStatusDisplay(b.status),
     date: b.date,
+    dateFormatted: formatFigmaBookingDate(b.date, b.startTime),
+    relativeTime: formatRelativeDays(b.date),
     startTime: b.startTime || null,
     endTime: b.endTime || null,
     duration: b.duration ?? null,
-    lessonType: b.lessonType || null,
+    durationText: b.duration ? `${b.duration} min` : null,
+    header: {
+      title: 'Lesson details',
+      status: b.status,
+      statusDisplay: getStatusDisplay(b.status),
+      dateFormatted: formatFigmaBookingDate(b.date, b.startTime),
+      subtitle: `${b.duration || 60} min · ${poolName || 'Oak Lawn Community Pool'}`,
+      payout: {
+        status: isPaidOut ? 'Paid out' : 'Pending payout',
+        amount: instructorEarningsVal,
+        amountFormatted: `+$${instructorEarningsVal.toFixed(2)}`,
+        text: isPaidOut
+          ? (payoutDate ? `Paid out ${monthsShort[new Date(payoutDate).getMonth()]} ${new Date(payoutDate).getDate()}` : 'Paid out')
+          : 'Pending payout',
+        isPaidOut
+      }
+    },
+    payout: {
+      status: isPaidOut ? 'Paid out' : 'Pending payout',
+      amount: instructorEarningsVal,
+      amountFormatted: `+$${instructorEarningsVal.toFixed(2)}`,
+      text: isPaidOut
+        ? (payoutDate ? `Paid out ${monthsShort[new Date(payoutDate).getMonth()]} ${new Date(payoutDate).getDate()}` : 'Paid out')
+        : 'Pending payout',
+      isPaidOut
+    },
+    bookedBy: clientUser ? {
+      _id: clientUser._id || null,
+      fullName: clientUser.fullName || null,
+      image: clientUser.image || null,
+      email: clientUser.email || null,
+      number: clientUser.number || null,
+      rating: clientUser.avgRating ?? 5.0,
+      ratingText: `${(clientUser.avgRating || 5.0).toFixed(1)} · rated by ${clientUser.ratingCount || clientUser.totalReviews || 1} instructors`,
+      stats: {
+        lessonsBooked: clientStats.lessonsBooked,
+        lessonsBookedText: `${clientStats.lessonsBooked}`,
+        cancels: clientStats.cancels,
+        cancelsText: `${clientStats.cancels}`,
+        memberSince: clientStats.memberSince,
+        memberText: clientStats.memberText
+      }
+    } : null,
+    swimmer: b.swimmer ? {
+      name: b.swimmer.name || null,
+      age: b.swimmer.age ?? null,
+      formatted: b.swimmer.name ? `${b.swimmer.name}, age ${b.swimmer.age}` : '',
+      comfortLevel: b.swimmer.comfortLevel || null,
+      comfortLevelDisplay: formatComfortLevelDisplay(b.swimmer.comfortLevel),
+      notes: b.swimmer.notes || null,
+      parentNote: b.swimmer.notes || null,
+      bookedFor: b.swimmer.bookedFor || 'someone_else'
+    } : null,
+    where: {
+      poolName,
+      address,
+      poolDetails,
+      fullAddress: fullAddressWithDetails,
+      mapImage: '/uploads/pools/pool-map-placeholder.png',
+      coordinates: (b.location?.location?.coordinates && b.location.location.coordinates.length === 2)
+        ? b.location.location.coordinates
+        : [],
+      directionsUrl
+    },
+    location: locationData,
+    theirReview,
+    yourRating,
+    lesson: {
+      type: b.lessonType || '60-min private lesson',
+      duration: b.duration ?? 60,
+      durationText: b.duration ? `${b.duration} min` : '60 min',
+      price: b.pricing?.lessonPrice ?? 0,
+      priceFormatted: `$${Number(b.pricing?.lessonPrice ?? 0).toFixed(2)}`,
+      earnings: instructorEarningsVal,
+      earningsFormatted: `+$${instructorEarningsVal.toFixed(2)}`
+    },
+    pricing: b.pricing ? {
+      lessonPrice: b.pricing.lessonPrice ?? null,
+      lessonPriceFormatted: b.pricing.lessonPrice != null ? `$${Number(b.pricing.lessonPrice).toFixed(2)}` : null,
+      instructorEarnings: instructorEarningsVal,
+      instructorEarningsFormatted: `+$${instructorEarningsVal.toFixed(2)}`,
+      bookingFee: b.pricing.bookingFee ?? null,
+      poolEntryFee: poolEntryFeeVal,
+      totalAmount: b.pricing.totalAmount ?? null
+    } : null,
+    actions: {
+      canChat: ['accepted', 'active', 'completed'].includes(b.status),
+      chatId: resolvedChatId || null,
+      chatButtonText: `Message ${clientFirstName}`,
+      canEditReview: Boolean(instructorRev),
+      canReview: Boolean(b.status === 'completed' && !instructorRev)
+    },
+    canChat: ['accepted', 'active', 'completed'].includes(b.status),
+    chatId: resolvedChatId || null,
+    createdAt: b.createdAt,
+    updatedAt: b.updatedAt
+  };
 
-    // Instructor Card
+  // 2. User-specific View Payload (Figma 40012239:1080 & 40012606:5436)
+  const userViewData = {
+    roleView: 'user',
+    _id: b._id,
+    bookingId: b.bookingId || null,
+    status: b.status,
+    statusDisplay: getStatusDisplay(b.status),
+    date: b.date,
+    dateFormatted: formatFigmaBookingDate(b.date, b.startTime),
+    relativeTime: formatRelativeDays(b.date),
+    startTime: b.startTime || null,
+    endTime: b.endTime || null,
+    duration: b.duration ?? null,
+    durationText: b.duration ? `${b.duration} min` : null,
+    lessonType: b.lessonType || null,
+    header: {
+      title: 'Booking details',
+      status: b.status,
+      statusDisplay: getStatusDisplay(b.status),
+      dateFormatted: formatFigmaBookingDate(b.date, b.startTime),
+      relativeCountdown: `${formatRelativeDays(b.date)} · ${b.duration || 60} min`,
+      calendar: {
+        title: `${b.lessonType || '60-min private lesson'} with ${instructorUser?.fullName || 'Instructor'}`,
+        date: b.date,
+        startTime: b.startTime || null,
+        endTime: b.endTime || null,
+        location: fullAddressWithDetails
+      }
+    },
     instructor: instructorUser ? {
       _id: instructorUser._id || null,
       fullName: instructorUser.fullName || null,
       image: instructorUser.image || null,
       email: instructorUser.email || null,
       number: instructorUser.number || null,
-      rating: instructorUser.avgRating ?? null,
-      avgRating: instructorUser.avgRating ?? null,
-      totalReviews: instructorUser.totalReviews ?? (instructorUser.ratingCount ?? null),
+      address: instructorUser.address || '',
+      city: instructorUser.address ? instructorUser.address.split(',')[0].trim() : '',
+      rating: instructorUser.avgRating ?? 0,
+      avgRating: instructorUser.avgRating ?? 0,
+      totalReviews: instructorUser.totalReviews ?? (instructorUser.ratingCount ?? 0),
+      ratingText: `${(instructorUser.avgRating || 0).toFixed(1)} · ${instructorUser.totalReviews || instructorUser.lessonsTaught || 0} lessons`,
+      lessonsTaught: instructorUser.lessonsTaught || 0,
+      experience: {
+        years: instructorUser.experience?.years || 0,
+        description: instructorUser.experience?.description || '',
+        formatted: `${instructorUser.experience?.years || 0} yrs`
+      },
+      bio: instructorUser.bio || instructorUser.about || '',
+      about: instructorUser.about || instructorUser.bio || '',
+      teaches: (instructorUser.teaches && instructorUser.teaches.length > 0)
+        ? instructorUser.teaches
+        : ['Kids 5-12', 'Teens', 'Adult'],
+      speaks: (instructorUser.speaks && instructorUser.speaks.length > 0)
+        ? instructorUser.speaks
+        : ['English', 'Spanish'],
+      verification: {
+        isVerified: Boolean(instructorUser.isVerified || instructorUser.backgroundCheck?.status === 'cleared'),
+        badge: 'Checked by SwimLetes',
+        certifications: instructorUser.certifications || (instructorUser.certification?.name ? `${instructorUser.certification.name} · CPR/AED current · Background check cleared` : 'Red Cross Water Safety Instructor · CPR/AED current · Background check cleared'),
+        howWeVerifyText: 'How we verify instructors'
+      },
+      poolOptions: [
+        {
+          id: 'client_pool',
+          type: 'client_pool',
+          title: `${instructorFirstName} comes to your pool`,
+          description: 'Your home pool. Free within 15 miles of her, then a small travel charge.'
+        },
+        {
+          id: 'public_pool',
+          type: 'public_pool',
+          title: 'Meet at a public pool',
+          description: 'List your services, manage bookings, and get paid.',
+          poolName: poolName || 'Oak Lawn Community Pool',
+          entryFee: poolEntryFeeVal > 0 ? poolEntryFeeVal : 8.00,
+          entryFeeFormatted: `$${(poolEntryFeeVal > 0 ? poolEntryFeeVal : 8.00).toFixed(2)}`,
+          entryFeeNotice: 'Added to your total at checkout.'
+        },
+        {
+          id: 'instructor_pool',
+          type: 'instructor_pool',
+          title: `Use ${instructorFirstName}'s pool`,
+          description: `${instructorFirstName}’s private pool in Oak Lawn, about 4 miles from you.`,
+          notice: 'Exact address shared once she accepts.'
+        }
+      ],
+      goodToKnow: {
+        cancelling: 'Free up to 24 hours before. After that, half the lesson price.',
+        bring: 'Swimsuit, towel, goggles. Caps sold at reception for $8.',
+        parents: 'Welcome on the deck. Under-8s need an adult on site.'
+      },
       chatId: resolvedChatId || null
     } : null,
-
-    // Client
-    client: clientUser ? {
-      _id: clientUser._id || null,
-      fullName: clientUser.fullName || null,
-      image: clientUser.image || null,
-      email: clientUser.email || null,
-      number: clientUser.number || null
-    } : null,
-
-    // Swimmer Details
+    yourLesson: {
+      swimmer: b.swimmer ? {
+        name: b.swimmer.name || null,
+        age: b.swimmer.age ?? null,
+        formatted: b.swimmer.name ? `${b.swimmer.name}, age ${b.swimmer.age}` : '',
+        comfortLevel: b.swimmer.comfortLevel || null,
+        comfortLevelDisplay: formatComfortLevelDisplay(b.swimmer.comfortLevel)
+      } : null,
+      lesson: {
+        type: b.lessonType || '60-min private lesson',
+        duration: b.duration ?? 60,
+        durationText: b.duration ? `${b.duration} min` : '60 min'
+      },
+      waiver: b.waiver ? {
+        isSigned: Boolean(b.waiver.isSigned),
+        legalName: b.waiver.legalName || null,
+        signedDate: b.waiver.signedDate || null,
+        signedDateFormatted: b.waiver.signedDate ? formatDateShort(b.waiver.signedDate) : null,
+        signerRelationship: b.waiver.signerRelationship || null,
+        waiverVersion: b.waiver.waiverVersion || 'v1.0',
+        summary: b.waiver.legalName ? `Form 1 signed by ${b.waiver.legalName}` : 'Form 1 signed'
+      } : null
+    },
+    location: locationData,
+    payment: {
+      items: [
+        {
+          label: b.lessonType || '60-min private lesson',
+          amount: b.pricing?.lessonPrice ?? 0,
+          amountFormatted: `$${Number(b.pricing?.lessonPrice ?? 0).toFixed(2)}`
+        },
+        {
+          label: 'Booking fee',
+          amount: b.pricing?.bookingFee ?? 0,
+          amountFormatted: `$${Number(b.pricing?.bookingFee ?? 0).toFixed(2)}`
+        },
+        ...(poolEntryFeeVal > 0 ? [{
+          label: 'Entry fee',
+          amount: poolEntryFeeVal,
+          amountFormatted: `$${poolEntryFeeVal.toFixed(2)}`
+        }] : []),
+        ...(b.pricing?.travelFee > 0 ? [{
+          label: 'Travel fee',
+          amount: b.pricing.travelFee,
+          amountFormatted: `$${Number(b.pricing.travelFee).toFixed(2)}`
+        }] : [])
+      ],
+      lessonPrice: b.pricing?.lessonPrice ?? null,
+      lessonPriceFormatted: b.pricing?.lessonPrice != null ? `$${Number(b.pricing.lessonPrice).toFixed(2)}` : null,
+      bookingFee: b.pricing?.bookingFee ?? null,
+      bookingFeeFormatted: b.pricing?.bookingFee != null ? `$${Number(b.pricing.bookingFee).toFixed(2)}` : null,
+      poolEntryFee: poolEntryFeeVal,
+      poolEntryFeeFormatted: `$${poolEntryFeeVal.toFixed(2)}`,
+      travelFee: b.pricing?.travelFee ?? null,
+      travelFeeFormatted: b.pricing?.travelFee != null ? `$${Number(b.pricing.travelFee).toFixed(2)}` : null,
+      discountAmount: b.pricing?.discountAmount ?? null,
+      discountAmountFormatted: b.pricing?.discountAmount != null ? `$${Number(b.pricing.discountAmount).toFixed(2)}` : null,
+      totalAmount: b.pricing?.totalAmount ?? null,
+      totalFormatted: b.pricing?.totalAmount != null ? `$${Number(b.pricing.totalAmount).toFixed(2)}` : null,
+      cardBrand: b.payment?.cardBrand || null,
+      last4: b.payment?.last4 || null,
+      paidAt: b.payment?.paidAt || null,
+      paidAtFormatted: b.payment?.paidAt ? formatDateShort(b.payment.paidAt) : null,
+      cardSummary: `${b.payment?.cardBrand || 'Card'} ·· ${b.payment?.last4 || '••••'}${b.payment?.paidAt ? ' · ' + monthsShort[new Date(b.payment.paidAt).getMonth()] + ' ' + new Date(b.payment.paidAt).getDate() : ''}`,
+      bookingId: b.bookingId || null,
+      transactionId: b.payment?.transactionId || null,
+      receiptUrl: b.payment?.status === 'paid' ? `/api/v1/booking/${b._id}/receipt` : null
+    },
+    cancellationPolicy: {
+      notice: formatCancellationCutoff(b.date, b.startTime),
+      canCancel: ['pending', 'accepted'].includes(b.status),
+      cancellationWindow: b.cancellationWindow || 'free'
+    },
+    actions: {
+      canChat: ['accepted', 'active', 'completed'].includes(b.status),
+      chatId: resolvedChatId || null,
+      chatButtonText: `Message ${instructorFirstName}`,
+      canCancel: ['pending', 'accepted'].includes(b.status),
+      cancelButtonText: 'Cancel Booking',
+      canReview: Boolean(b.status === 'completed' && !clientRev)
+    },
+    // Backward compatibility root keys
     swimmer: b.swimmer ? {
       name: b.swimmer.name || null,
       age: b.swimmer.age ?? null,
+      formatted: b.swimmer.name ? `${b.swimmer.name}, age ${b.swimmer.age}` : '',
       comfortLevel: b.swimmer.comfortLevel || null,
-      notes: b.swimmer.notes || null,
-      bookedFor: b.swimmer.bookedFor || null
+      comfortLevelDisplay: formatComfortLevelDisplay(b.swimmer.comfortLevel)
     } : null,
-
-    // Lesson Details
     lesson: {
-      type: b.lessonType || null,
-      duration: b.duration ?? null,
-      price: b.pricing?.lessonPrice ?? null
+      type: b.lessonType || '60-min private lesson',
+      duration: b.duration ?? 60,
+      durationText: b.duration ? `${b.duration} min` : '60 min',
+      price: b.pricing?.lessonPrice ?? null,
+      priceFormatted: b.pricing?.lessonPrice != null ? `$${Number(b.pricing.lessonPrice).toFixed(2)}` : null
     },
-
-    // Waiver Agreement
     waiver: b.waiver ? {
       isSigned: Boolean(b.waiver.isSigned),
       legalName: b.waiver.legalName || null,
-      signedDate: b.waiver.signedDate || null,
-      signerRelationship: b.waiver.signerRelationship || null,
-      waiverVersion: b.waiver.waiverVersion || null
+      signedDateFormatted: b.waiver.signedDate ? formatDateShort(b.waiver.signedDate) : null,
+      summary: b.waiver.legalName ? `Form 1 signed by ${b.waiver.legalName}` : 'Form 1 signed'
     } : null,
-
-    // Location
-    location: b.location ? {
-      locationType: b.location.locationType || null,
-      poolName: b.location.poolName || null,
-      address: b.location.address || null,
-      coordinates: (b.location?.location?.coordinates && b.location.location.coordinates.length === 2)
-        ? b.location.location.coordinates
-        : []
-    } : null,
-
-    // Pricing Breakdown
     pricing: b.pricing ? {
       lessonPrice: b.pricing.lessonPrice ?? null,
+      lessonPriceFormatted: b.pricing.lessonPrice != null ? `$${Number(b.pricing.lessonPrice).toFixed(2)}` : null,
       bookingFee: b.pricing.bookingFee ?? null,
-      poolEntryFee: b.pricing.poolEntryFee ?? null,
-      travelFee: b.pricing.travelFee ?? null,
-      discountAmount: b.pricing.discountAmount ?? null,
+      bookingFeeFormatted: b.pricing.bookingFee != null ? `$${Number(b.pricing.bookingFee).toFixed(2)}` : null,
+      poolEntryFee: poolEntryFeeVal,
+      poolEntryFeeFormatted: `$${poolEntryFeeVal.toFixed(2)}`,
       totalAmount: b.pricing.totalAmount ?? null,
-      ...(isInstructor || isAdmin ? {
-        instructorEarnings: b.pricing.instructorEarnings ?? null,
-        platformCommission: b.pricing.platformCommission ?? null
-      } : {})
+      totalAmountFormatted: b.pricing.totalAmount != null ? `$${Number(b.pricing.totalAmount).toFixed(2)}` : null
     } : null,
-
-    // Payment Information
-    payment: b.payment ? {
-      method: b.payment.method || null,
-      status: b.payment.status || null,
-      cardBrand: b.payment.cardBrand || null,
-      last4: b.payment.last4 || null,
-      paidAt: b.payment.paidAt || null,
-      transactionId: b.payment.transactionId || null,
-      receiptUrl: b.payment.status === 'paid' ? `/api/v1/booking/${b._id}/receipt` : null
-    } : null,
-
-    // Cancellation Details & Eligibility
-    canCancel: ['pending', 'accepted'].includes(b.status),
-    cancellationWindow: b.cancellationWindow || null,
-    cancelledBy: b.cancelledBy || null,
-    cancellationReason: b.cancellationReason || null,
-    refundAmount: b.refundAmount ?? null,
-    cancelledAt: b.cancelledAt || null,
-
-    // Actions / Chat
     canChat: ['accepted', 'active', 'completed'].includes(b.status),
     chatId: resolvedChatId || null,
-
+    canCancel: ['pending', 'accepted'].includes(b.status),
+    canReview: Boolean(b.status === 'completed' && !clientRev),
     createdAt: b.createdAt,
     updatedAt: b.updatedAt
   };
+
+  if (effectiveRole === 'instructor') {
+    return instructorViewData;
+  }
+
+  if (effectiveRole === 'admin') {
+    return {
+      roleView: 'admin',
+      _id: b._id,
+      bookingId: b.bookingId || null,
+      status: b.status,
+      statusDisplay: getStatusDisplay(b.status),
+      userView: userViewData,
+      instructorView: instructorViewData,
+      ...userViewData,
+      bookedBy: instructorViewData.bookedBy,
+      where: instructorViewData.where,
+      theirReview: instructorViewData.theirReview,
+      yourRating: instructorViewData.yourRating,
+      payout: instructorViewData.payout
+    };
+  }
+
+  // Default to user view
+  return userViewData;
 };
 
 /**

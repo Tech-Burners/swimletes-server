@@ -74,8 +74,8 @@ const getBookingTabCounts = catchAsync(async (req, res) => {
 // Get booking details
 const getBookingDetails = catchAsync(async (req, res) => {
   const userId = req.User ? req.User._id : null;
-  const userRole = req.User ? req.User.role : (req.query.role || 'user');
-  const result = await getBookingByIdService(req.params.id, userId, userRole);
+  const requestedRole = req.query.view || req.query.role || (req.User ? req.User.role : null);
+  const result = await getBookingByIdService(req.params.id, userId, requestedRole, req.query);
   return res.status(status.OK).json(
     response({
       status: 'OK',
