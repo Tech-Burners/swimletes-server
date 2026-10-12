@@ -10,19 +10,12 @@ const publicPoolSchema = new mongoose.Schema(
     },
     address: {
       type: String,
-      required: true,
+      default: '',
       trim: true // e.g. "123 Main Street, Austin, TX"
     },
     location: {
-      type: {
-        type: String,
-        enum: ['Point'],
-        default: 'Point'
-      },
-      coordinates: {
-        type: [Number],
-        default: [0, 0] // [longitude, latitude]
-      }
+      type: mongoose.Schema.Types.Mixed,
+      default: () => ({ type: 'Point', coordinates: [0, 0] })
     },
     hasEntryFee: {
       type: Boolean,
