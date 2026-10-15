@@ -110,8 +110,13 @@ const webhookRoutes = require("./modules/Booking/webhook.route");
 app.use(["/webhook", "/weebhook", "/helpers", "/stripe"], webhookRoutes);
 app.use("/api/v1", routes);
 
-// Instructor UI Pages (Figma 40012288:1871, 40012321:3120, 40012392:3369)
-app.get("/instructor", (req, res) => {
+// UI Pages (Figma 40012288:1871, 40012321:3120, 40012392:3369, Notifications 40012289:5166)
+app.get([
+  "/instructor",
+  "/instructor/*",
+  "/notifications",
+  "/notification"
+], (req, res) => {
   res.sendFile(path.join(__dirname, "../public/instructor/index.html"));
 });
 

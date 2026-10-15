@@ -21,8 +21,14 @@ const elements = {
   // Screens & Navigation
   screenHome: document.getElementById('screenHome'),
   screenDetails: document.getElementById('screenDetails'),
+  screenNotifications: document.getElementById('screenNotifications'),
   btnTabHome: document.getElementById('btnTabHome'),
   btnTabDetails: document.getElementById('btnTabDetails'),
+  btnTabNotifications: document.getElementById('btnTabNotifications'),
+  notificationsContentArea: document.getElementById('notificationsContentArea'),
+  btnMarkAllRead: document.getElementById('btnMarkAllRead'),
+  btnNotificationsBack: document.getElementById('btnNotificationsBack'),
+  notificationBadge: document.getElementById('notificationBadge'),
   deviceFrame: document.getElementById('deviceFrame'),
   btnToggleView: document.getElementById('btnToggleView'),
   toggleViewText: document.getElementById('toggleViewText'),
@@ -86,6 +92,8 @@ document.addEventListener('DOMContentLoaded', () => {
   initClock();
   fetchInstructorHomeData();
   fetchBookingDetailsData('6ab50023288ef74eb2858fbd');
+  fetchNotificationBadgeCount();
+  initNotificationsSocket();
 });
 
 // Update live device clock
@@ -107,18 +115,28 @@ function initClock() {
 function switchScreen(screen) {
   state.currentScreen = screen;
 
+  // Remove active from all screens and tabs
+  elements.screenHome.classList.remove('active-screen');
+  elements.screenDetails.classList.remove('active-screen');
+  if (elements.screenNotifications) elements.screenNotifications.classList.remove('active-screen');
+
+  elements.btnTabHome.classList.remove('active');
+  elements.btnTabDetails.classList.remove('active');
+  if (elements.btnTabNotifications) elements.btnTabNotifications.classList.remove('active');
+
   if (screen === 'home') {
     elements.screenHome.classList.add('active-screen');
-    elements.screenDetails.classList.remove('active-screen');
     elements.btnTabHome.classList.add('active');
-    elements.btnTabDetails.classList.remove('active');
     document.body.classList.remove('dark-status-bar');
-  } else {
-    elements.screenHome.classList.remove('active-screen');
+  } else if (screen === 'details') {
     elements.screenDetails.classList.add('active-screen');
-    elements.btnTabHome.classList.remove('active');
     elements.btnTabDetails.classList.add('active');
     document.body.classList.add('dark-status-bar');
+  } else if (screen === 'notifications') {
+    if (elements.screenNotifications) elements.screenNotifications.classList.add('active-screen');
+    if (elements.btnTabNotifications) elements.btnTabNotifications.classList.add('active');
+    document.body.classList.add('dark-status-bar');
+    fetchNotificationsData();
   }
 
   // Scroll active screen to top
@@ -542,4 +560,327 @@ async function submitReportIssue(event) {
     submitBtn.innerHTML = '<span>Submit Report</span>';
   }
 }
+
+// ==========================================================================
+// NOTIFICATIONS MODULE (Figma Node 40012289:5166)
+// ==========================================================================
+
+let notificationsState = {
+  unreadCount: 0,
+  notifications: [],
+  grouped: {
+    today: [],
+    yesterday: [],
+    earlier: []
+  }
+};
+
+/**
+ * Fetch Unread Notification Count for Badge
+ */
+async function fetchNotificationBadgeCount() {
+  try {
+    const res = await fetch(`${API_BASE}/notifications/unread-count`);
+    if (!res.ok) return;
+    const json = await res.json();
+    const count = json.data?.unreadCount ?? 0;
+    updateNotificationBadge(count);
+  } catch (err) {
+    console.warn('Error fetching notification unread count:', err);
+  }
+}
+
+/**
+ * Update Notification Bell Badge Display
+ */
+function updateNotificationBadge(count) {
+  notificationsState.unreadCount = count;
+  if (!elements.notificationBadge) return;
+  if (count > 0) {
+    elements.notificationBadge.textContent = count > 99 ? '99+' : count;
+    elements.notificationBadge.style.display = 'flex';
+  } else {
+    elements.notificationBadge.textContent = '';
+    elements.notificationBadge.style.display = 'none';
+  }
+}
+
+/**
+ * Fetch All Notifications from Live Express API (Figma Node 40012289:5166)
+ */
+async function fetchNotificationsData() {
+  const container = elements.notificationsContentArea;
+  if (!container) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/notifications?seedDemo=true`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const data = json.data || {};
+
+    notificationsState = data;
+    updateNotificationBadge(data.unreadCount ?? 0);
+    renderNotificationsData(data);
+  } catch (err) {
+    console.error('Error fetching notifications:', err);
+    container.innerHTML = `
+      <div class="notifications-empty-state">
+        <div class="notifications-empty-icon">⚠️</div>
+        <div class="notifications-empty-title">Could not load notifications</div>
+        <div class="notifications-empty-desc">${err.message || 'Please check your connection and try again.'}</div>
+      </div>
+    `;
+  }
+}
+
+/**
+ * Helper to produce SVG icon based on notification type/icon
+ */
+function getNotificationIconSvg(type, icon) {
+  switch (icon || type) {
+    case 'star':
+    case 'lesson_review':
+      return `<svg width="22" height="22" viewBox="0 0 24 24" fill="#E8943F" stroke="#E8943F" stroke-width="1.2">
+        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+      </svg>`;
+
+    case 'clock':
+    case 'lesson_reminder':
+      return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#33B4FD" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <polyline points="12 6 12 12 16 14"></polyline>
+      </svg>`;
+
+    case 'calendar-check':
+    case 'booking_confirmed':
+      return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+        <line x1="16" y1="2" x2="16" y2="6"></line>
+        <line x1="8" y1="2" x2="8" y2="6"></line>
+        <line x1="3" y1="10" x2="21" y2="10"></line>
+        <polyline points="9 16 12 19 16 14"></polyline>
+      </svg>`;
+
+    case 'calendar-x':
+    case 'booking_cancelled':
+      return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+        <line x1="16" y1="2" x2="16" y2="6"></line>
+        <line x1="8" y1="2" x2="8" y2="6"></line>
+        <line x1="3" y1="10" x2="21" y2="10"></line>
+        <line x1="10" y1="14" x2="14" y2="18"></line>
+        <line x1="14" y1="14" x2="10" y2="18"></line>
+      </svg>`;
+
+    case 'dollar':
+    case 'refund_processed':
+      return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6366F1" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="1" x2="12" y2="23"></line>
+        <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+      </svg>`;
+
+    case 'x-circle':
+    case 'booking_declined':
+      return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F43F5E" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="15" y1="9" x2="9" y2="15"></line>
+        <line x1="9" y1="9" x2="15" y2="15"></line>
+      </svg>`;
+
+    case 'message':
+    case 'chat_message':
+      return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#33B4FD" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+      </svg>`;
+
+    default:
+      return `<svg width="22" height="22" viewBox="0 0 24 24" fill="#E8943F" stroke="#E8943F" stroke-width="1.2">
+        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+      </svg>`;
+  }
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+/**
+ * Render Notifications Grouped by Today, Yesterday, and Earlier (Figma Node 40012289:5166)
+ */
+function renderNotificationsData(data) {
+  const container = elements.notificationsContentArea;
+  if (!container) return;
+
+  const grouped = data.grouped || {};
+  const hasToday = Array.isArray(grouped.today) && grouped.today.length > 0;
+  const hasYesterday = Array.isArray(grouped.yesterday) && grouped.yesterday.length > 0;
+  const hasEarlier = Array.isArray(grouped.earlier) && grouped.earlier.length > 0;
+
+  if (!hasToday && !hasYesterday && !hasEarlier && (!data.notifications || data.notifications.length === 0)) {
+    container.innerHTML = `
+      <div class="notifications-empty-state">
+        <div class="notifications-empty-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+          </svg>
+        </div>
+        <div class="notifications-empty-title">All caught up!</div>
+        <div class="notifications-empty-desc">You have no new notifications right now.</div>
+      </div>
+    `;
+    return;
+  }
+
+  let html = '';
+
+  const renderGroup = (title, items) => {
+    if (!items || items.length === 0) return '';
+    let groupHtml = `
+      <div class="notification-date-group">
+        <h2 class="notification-date-group-title">${title}</h2>
+        <div class="notification-group-list">
+    `;
+
+    items.forEach((item) => {
+      const isUnread = !item.isRead;
+      const iconSvg = getNotificationIconSvg(item.type, item.icon);
+      const iconBg = item.iconBg || 'rgba(232, 148, 63, 0.2)';
+
+      groupHtml += `
+        <div class="notification-row ${isUnread ? 'unread' : ''}" id="notifRow_${item._id}" onclick="handleNotificationClick('${item._id}')">
+          <div class="notification-icon-wrap" style="background: ${iconBg};">
+            ${iconSvg}
+          </div>
+          <div class="notification-content-col">
+            <div class="notification-item-title">${escapeHtml(item.title)}</div>
+            <div class="notification-item-message">${escapeHtml(item.message)}</div>
+            <div class="notification-item-time">${escapeHtml(item.time || item.relativeTime)}</div>
+          </div>
+        </div>
+      `;
+    });
+
+    groupHtml += `
+        </div>
+      </div>
+    `;
+    return groupHtml;
+  };
+
+  if (hasToday) html += renderGroup('Today', grouped.today);
+  if (hasYesterday) html += renderGroup('Yesterday', grouped.yesterday);
+  if (hasEarlier) html += renderGroup('Earlier', grouped.earlier);
+
+  // Fallback for flat list if not categorized
+  if (!html && data.notifications?.length > 0) {
+    html = renderGroup('All Notifications', data.notifications);
+  }
+
+  container.innerHTML = html;
+}
+
+/**
+ * Handle "Mark as all read" Action
+ */
+async function handleMarkAllRead() {
+  try {
+    const res = await fetch(`${API_BASE}/notifications/mark-all-read`, {
+      method: 'PATCH'
+    });
+
+    if (res.ok) {
+      // Remove all unread visual indicators
+      document.querySelectorAll('.notification-row.unread').forEach((row) => {
+        row.classList.remove('unread');
+      });
+      updateNotificationBadge(0);
+      showToast('All notifications marked as read', 'success');
+    }
+  } catch (err) {
+    console.error('Error marking all as read:', err);
+    // Optimistic UI update
+    document.querySelectorAll('.notification-row.unread').forEach((row) => {
+      row.classList.remove('unread');
+    });
+    updateNotificationBadge(0);
+    showToast('All notifications marked as read', 'success');
+  }
+}
+
+/**
+ * Handle Single Notification Item Click
+ */
+async function handleNotificationClick(notificationId) {
+  const row = document.getElementById(`notifRow_${notificationId}`);
+  if (row && row.classList.contains('unread')) {
+    row.classList.remove('unread');
+    if (notificationsState.unreadCount > 0) {
+      updateNotificationBadge(notificationsState.unreadCount - 1);
+    }
+
+    try {
+      await fetch(`${API_BASE}/notifications/${notificationId}/read`, {
+        method: 'PATCH'
+      });
+    } catch (err) {
+      console.warn('Error marking notification as read:', err);
+    }
+  }
+}
+
+/**
+ * Real-Time Socket Connection for Instant Live Notifications
+ */
+function initNotificationsSocket() {
+  if (typeof io === 'undefined') {
+    console.warn('Socket.io library not loaded, real-time live events will use HTTP polling');
+    return;
+  }
+
+  try {
+    const socketHost = window.location.hostname || 'localhost';
+    const socketUrl = `${window.location.protocol}//${socketHost}:3049`;
+    const socket = io(socketUrl, {
+      reconnection: true,
+      reconnectionAttempts: 5,
+      timeout: 5000
+    });
+
+    socket.on('connect', () => {
+      console.log('⚡ Connected to Swimletes notification socket:', socket.id);
+    });
+
+    socket.on('get notification', (data) => {
+      showToast(data.message || 'New notification', 'info');
+      fetchNotificationBadgeCount();
+      if (state.currentScreen === 'notifications') {
+        fetchNotificationsData();
+      }
+    });
+
+    socket.on('newNotification', (data) => {
+      showToast(data.data?.title || 'New notification', 'info');
+      fetchNotificationBadgeCount();
+      if (state.currentScreen === 'notifications') {
+        fetchNotificationsData();
+      }
+    });
+
+    socket.on('notificationCount', (data) => {
+      if (typeof data.unreadCount === 'number') {
+        updateNotificationBadge(data.unreadCount);
+      }
+    });
+  } catch (err) {
+    console.warn('Socket initialization error:', err);
+  }
+}
+
 

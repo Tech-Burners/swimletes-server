@@ -784,7 +784,19 @@ const getInstructorHomeFeedService = async (instructorId, queryParams = {}) => {
   const todayCount = today.length;
   const todayLessonText = todayCount === 1 ? '1 Lesson' : `${todayCount} Lessons`;
 
+  let unreadNotificationCount = 0;
+  try {
+    const Notification = require('../Notification/notification.model');
+    unreadNotificationCount = await Notification.countDocuments({
+      recipient: targetInstructorId,
+      isRead: false
+    });
+  } catch (notifErr) {
+    unreadNotificationCount = 0;
+  }
+
   return {
+    unreadNotificationCount,
     overview: {
       todayCount,
       upcomingCount,
@@ -792,7 +804,8 @@ const getInstructorHomeFeedService = async (instructorId, queryParams = {}) => {
       newRequestCount,
       earnedAllTime,
       rating,
-      totalReviews
+      totalReviews,
+      unreadNotificationCount
     },
     todayCount,
     todayLessonText,

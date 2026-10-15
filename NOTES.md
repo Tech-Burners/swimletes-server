@@ -30,6 +30,7 @@
 | `Token` | Internal Helper | JWT token generation and verification logic | Active |
 | `User` | `/api/v1/user` | Base user profiles (swimmer/parent, instructor, admin), certifications (CPR, First Aid), background check status, geo-location (2dsphere), earnings & stats | Active |
 | `PlatformSetting` | `/api/v1/admin/settings/fees` | Platform fee percentage, instructor commission rate, and chronological audit history | Active (`platformSetting.model.js`) |
+| `Notification` | `/api/v1/notifications`, `/notification` | Real-time & persistent notifications (Figma Node `40012289:5166`), grouping by Today, Yesterday, Earlier, read/unread status, unread counts, and "Mark as all read" | Active (`notification.model.js`) |
 
 ### 💡 Embedded Sub-Schemas & Integrations
 
@@ -59,7 +60,14 @@
   - **Admin Withdrawal History** (`40012563:22328`): `GET /api/v1/earnings/admin/withdrawals/history` (includes completed/rejected timestamps and rejection reason tooltips).
   - **Admin Refund Ledger** (`40012554:21158`): `GET /api/v1/booking/admin/refunds` (tab counts for all, dispute, cancellation, manual; search & sorting) & `POST /api/v1/booking/admin/refunds/issue` (executes Stripe refund and logs manual refund).
   - **Admin Platform Earnings & Transactions** (`40012563:22986`): `GET /api/v1/earnings/admin/overview` (4 KPI cards: Total Revenue, 5% Booking Fee, 15% Platform Commission, Net Earnings after Refunds + 12-month analytics chart) & `GET /api/v1/earnings/admin/transactions` (Transaction breakdown table).
-- **Realtime Notifications & Socket**: Configured in `src/socket/` with `socketNotification.js` and `socketIO.js`.
+- **Notifications Screen & Realtime Push** (`40012289:5166`): Served at `/notifications` and interactive mobile preview at `/instructor` (Tab 3):
+  - `GET /api/v1/notifications`: Returns user notifications grouped into `Today`, `Yesterday`, and `Earlier`, along with raw paginated list and relative timestamps (`"2 mins ago"`, `"5h ago"`, `"Yesterday, 2:40 PM"`, `"Aug 3"`).
+  - `GET /api/v1/notifications/unread-count`: Returns fast count of unread notifications for navigation badges.
+  - `PATCH /api/v1/notifications/mark-all-read`: Marks all unread notifications as read (matching Figma "Mark as all read" button) and broadcasts 0 unread badge count via Socket.io.
+  - `PATCH /api/v1/notifications/:id/read`: Marks single notification as read.
+  - `POST /api/v1/notifications/seed-demo`: Seeds sample notifications matching the exact 7 Figma items (lesson review, reminder, booking confirmed, instructor cancelled, refund processed, request declined, chat message) for instant evaluation.
+  - `DELETE /api/v1/notifications/:id` & `DELETE /api/v1/notifications`: Single deletion and clearing of notifications.
+- **Realtime Notifications & Socket**: Configured in `src/socket/` with `socketNotification.js` and `socketIO.js`. Automatically pushes notifications on booking accepted, declined, cancelled, lesson review requests, lesson reminders, and chat messages.
 
 ---
 

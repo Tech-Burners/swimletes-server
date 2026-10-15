@@ -179,6 +179,10 @@ const userSchema = new mongoose.Schema({
     isConfigured: { type: Boolean, default: false },
     updatedAt: { type: Date }
   },
+  enabledPushNotification: {
+    type: Boolean,
+    default: true
+  },
 },
   {
     timestamps: true,

@@ -569,6 +569,27 @@ const sendMessageService = async (userId, { chatId, receiverId, text = '', image
       message: populatedMessage
     });
 
+    // Create persistent notification for message receiver (Figma 40012289:5166)
+    try {
+      const { createNotificationService } = require('../Notification/notification.service');
+      const snippet = previewText ? `"${previewText.length > 80 ? previewText.substring(0, 77) + '...' : previewText}"` : 'Sent an attachment';
+      await createNotificationService({
+        recipient: targetReceiverId,
+        sender: userId,
+        title: 'You have a new message ',
+        message: snippet,
+        type: 'chat_message',
+        icon: 'message',
+        iconBg: 'rgba(51, 180, 253, 0.15)',
+        data: {
+          chatId: targetChat._id,
+          messageId: populatedMessage._id
+        }
+      });
+    } catch (notifErr) {
+      console.error('Error creating chat notification:', notifErr.message);
+    }
+
     io.to(senderRoom).emit('chatListUpdate', {
       ...chatListPayload,
       unreadCount: 0

@@ -2203,8 +2203,26 @@ const sendBookingReminderService = async (bookingId, instructorId) => {
         }
       });
     }
+
+    // Persist notification in database
+    const { createNotificationService } = require('../Notification/notification.service');
+    const poolName = booking.location?.poolName || booking.location?.address || 'Community Pool';
+    await createNotificationService({
+      recipient: booking.client?._id || booking.client,
+      sender: booking.instructor?._id || booking.instructor,
+      title: 'Lesson starts in 1 hour',
+      message: `${poolName} · ${booking.startTime || 'Scheduled time'}`,
+      type: 'lesson_reminder',
+      icon: 'clock',
+      iconBg: 'rgba(51, 180, 253, 0.15)',
+      data: {
+        bookingId: booking._id,
+        bookingReference: booking.bookingId,
+        remindedAt: booking.lastRemindedAt
+      }
+    });
   } catch (socketErr) {
-    console.error('Failed to emit socket notification for reminder:', socketErr.message);
+    console.error('Failed to create/emit notification for reminder:', socketErr.message);
   }
 
   return {
@@ -2279,6 +2297,29 @@ const acceptBookingService = async (bookingId, instructorId) => {
     console.error('Error linking chat to accepted booking:', chatErr);
   }
 
+  // Trigger Booking Confirmed Notification for client (Figma 40012289:5166)
+  try {
+    const { createNotificationService } = require('../Notification/notification.service');
+    const lessonDateStr = booking.date ? new Date(booking.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+    const formattedDate = lessonDateStr ? `${lessonDateStr} at ${booking.startTime || ''}` : (booking.startTime || '');
+    const lessonInfo = `${formattedDate} · ${booking.duration || 45}-min ${booking.lessonType || 'private lesson'}`;
+    await createNotificationService({
+      recipient: booking.client,
+      sender: booking.instructor,
+      title: 'Booking confirmed',
+      message: lessonInfo,
+      type: 'booking_confirmed',
+      icon: 'calendar-check',
+      iconBg: 'rgba(16, 185, 129, 0.15)',
+      data: {
+        bookingId: booking._id,
+        bookingReference: booking.bookingId
+      }
+    });
+  } catch (notifErr) {
+    console.error('Error creating accept booking notification:', notifErr.message);
+  }
+
   const populated = await Booking.findById(booking._id)
     .populate('client', 'fullName email image')
     .populate('instructor', 'fullName email image')
@@ -2342,6 +2383,45 @@ const declineBookingService = async (bookingId, instructorId, reason = '') => {
   }
 
   await booking.save();
+
+  // Trigger Booking Declined & Refund Notifications for client (Figma 40012289:5166)
+  try {
+    const { createNotificationService } = require('../Notification/notification.service');
+    const lessonDateStr = booking.date ? new Date(booking.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+    const formattedDate = lessonDateStr ? `${lessonDateStr} at ${booking.startTime || ''}` : (booking.startTime || '');
+    await createNotificationService({
+      recipient: booking.client,
+      sender: booking.instructor,
+      title: 'Request declined',
+      message: `Your instructor isn't available ${formattedDate}. You haven't been charged.`,
+      type: 'booking_declined',
+      icon: 'x-circle',
+      iconBg: 'rgba(244, 63, 94, 0.15)',
+      data: {
+        bookingId: booking._id,
+        bookingReference: booking.bookingId,
+        declinedReason: booking.declinedReason
+      }
+    });
+
+    if (booking.payment?.status === 'refunded' && totalAmount > 0) {
+      await createNotificationService({
+        recipient: booking.client,
+        title: 'Refund processed',
+        message: `$${Number(totalAmount).toFixed(2)} back to card in 5–10 days`,
+        type: 'refund_processed',
+        icon: 'dollar',
+        iconBg: 'rgba(99, 102, 241, 0.15)',
+        data: {
+          bookingId: booking._id,
+          amount: totalAmount,
+          refundId: booking.payment?.stripeRefundId
+        }
+      });
+    }
+  } catch (notifErr) {
+    console.error('Error creating decline booking notification:', notifErr.message);
+  }
 
   const populated = await Booking.findById(booking._id)
     .populate('client', 'fullName email image')
@@ -2466,6 +2546,29 @@ const completeBookingService = async (bookingId, userId, userRole = null) => {
 
   await booking.save();
 
+  // Trigger Lesson Review Notification for client (Figma 40012289:5166)
+  try {
+    if (isInstructor || booking.status === 'completed') {
+      const { createNotificationService } = require('../Notification/notification.service');
+      await createNotificationService({
+        recipient: booking.client,
+        sender: booking.instructor,
+        title: "How was today's lesson?",
+        message: 'Rate your instructor to help other parents choose.',
+        type: 'lesson_review',
+        icon: 'star',
+        iconBg: 'rgba(232, 148, 63, 0.2)',
+        data: {
+          bookingId: booking._id,
+          bookingReference: booking.bookingId,
+          instructorId: booking.instructor
+        }
+      });
+    }
+  } catch (notifErr) {
+    console.error('Error creating lesson review notification:', notifErr.message);
+  }
+
   const populated = await Booking.findById(booking._id)
     .populate('client', 'fullName email image')
     .populate('instructor', 'fullName email image')
@@ -2578,6 +2681,62 @@ const cancelBookingService = async (bookingId, userId, userRole, reason = '') =>
   }
 
   await booking.save();
+
+  // Trigger Booking Cancelled & Refund Notifications (Figma 40012289:5166)
+  try {
+    const { createNotificationService } = require('../Notification/notification.service');
+    const lessonDateStr = booking.date ? new Date(booking.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+
+    if (booking.cancelledBy === 'instructor') {
+      await createNotificationService({
+        recipient: booking.client,
+        sender: booking.instructor,
+        title: 'Your instructor cancelled',
+        message: `${lessonDateStr ? lessonDateStr + ' ' : ''}lesson cancelled`,
+        type: 'booking_cancelled',
+        icon: 'calendar-x',
+        iconBg: 'rgba(239, 68, 68, 0.15)',
+        data: {
+          bookingId: booking._id,
+          bookingReference: booking.bookingId,
+          cancellationReason: booking.cancellationReason
+        }
+      });
+
+      if (refundAmount > 0) {
+        await createNotificationService({
+          recipient: booking.client,
+          title: 'Refund processed',
+          message: `$${Number(refundAmount).toFixed(2)} back to card in 5–10 days`,
+          type: 'refund_processed',
+          icon: 'dollar',
+          iconBg: 'rgba(99, 102, 241, 0.15)',
+          data: {
+            bookingId: booking._id,
+            amount: refundAmount,
+            refundId: booking.payment?.stripeRefundId
+          }
+        });
+      }
+    } else {
+      await createNotificationService({
+        recipient: booking.instructor,
+        sender: booking.client,
+        title: 'Lesson cancelled by client',
+        message: `${lessonDateStr ? lessonDateStr + ' ' : ''}lesson cancelled`,
+        type: 'booking_cancelled',
+        icon: 'calendar-x',
+        iconBg: 'rgba(239, 68, 68, 0.15)',
+        data: {
+          bookingId: booking._id,
+          bookingReference: booking.bookingId,
+          cancellationReason: booking.cancellationReason
+        }
+      });
+    }
+  } catch (notifErr) {
+    console.error('Error creating cancel booking notification:', notifErr.message);
+  }
 
   const populated = await Booking.findById(booking._id)
     .populate('client', 'fullName email image')

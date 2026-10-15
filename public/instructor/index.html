@@ -11,6 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap" rel="stylesheet">
   
   <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 </head>
 <body class="device-mode">
 
@@ -31,8 +32,12 @@
         <span class="tab-num">2</span>
         <span>Lesson Details (40012321:3120)</span>
       </button>
-      <a href="/admin" class="nav-tab-btn" target="_blank" style="text-decoration: none; color: inherit;">
+      <button class="nav-tab-btn" id="btnTabNotifications" onclick="switchScreen('notifications')">
         <span class="tab-num">3</span>
+        <span>Notifications (40012289:5166)</span>
+      </button>
+      <a href="/admin" class="nav-tab-btn" target="_blank" style="text-decoration: none; color: inherit;">
+        <span class="tab-num">4</span>
         <span>Admin Disputes (40012554:20231) ↗</span>
       </a>
     </div>
@@ -108,7 +113,7 @@
               </div>
             </div>
             
-            <button class="notification-btn" id="btnNotification" title="Notifications">
+            <button class="notification-btn" id="btnNotification" onclick="switchScreen('notifications')" title="Notifications">
               <img src="/images/instructor/icon_notification.svg" alt="Notifications" />
               <span class="notification-badge" id="notificationBadge"></span>
             </button>
@@ -501,6 +506,36 @@
           <button class="btn-accept-large" id="btnDetailsAccept" onclick="handleAccept(event, 'demo-request-1')">
             <span>Accept</span>
           </button>
+        </div>
+
+      </section>
+
+      <!-- ========================================== -->
+      <!-- SCREEN 3: NOTIFICATIONS (Figma 40012289:5166) -->
+      <!-- ========================================== -->
+      <section class="screen-view" id="screenNotifications">
+        
+        <!-- Header Bar with Back Button, Title, and Mark As All Read -->
+        <div class="notifications-top-bar">
+          <div class="notifications-header-left">
+            <button class="notifications-back-btn" id="btnNotificationsBack" onclick="switchScreen('home')" title="Back to Home">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            </button>
+            <h1 class="notifications-title">Notifications</h1>
+          </div>
+          <button class="btn-mark-all-read" id="btnMarkAllRead" onclick="handleMarkAllRead()">Mark as all read</button>
+        </div>
+
+        <!-- Notifications Content Area -->
+        <div class="notifications-scroll-body" id="notificationsScrollBody">
+          <div id="notificationsContentArea">
+            <div class="notifications-loading">
+              <span class="loading-spinner"></span>
+              <span>Loading notifications...</span>
+            </div>
+          </div>
         </div>
 
       </section>

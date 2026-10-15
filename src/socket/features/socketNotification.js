@@ -1,10 +1,21 @@
 const safeSocketHandler = require("../../helpers/safeSocketHandler");
+const { createNotificationService } = require("../../modules/Notification/notification.service");
 
 const notificationHandler = (io, socket) => {
   socket.on(
     "push notification",
     safeSocketHandler(async (data, callback, socket, io) => {
-      const result = await addNotificationService(data);
+      const payload = typeof data === 'string' ? JSON.parse(data) : data;
+      const result = await createNotificationService({
+        recipient: payload.recipient || payload.targetUser,
+        sender: payload.sender || socket.userId,
+        title: payload.title || payload.message,
+        message: payload.message || payload.title,
+        type: payload.type || 'general',
+        data: payload.data || {},
+        icon: payload.icon,
+        iconBg: payload.iconBg
+      });
 
       callback?.({
         status: 200,
@@ -21,24 +32,30 @@ const notificationHandler = (io, socket) => {
   );
 };
 
-
 const EmiteNotificationHandler = (data) => {
-  // console.log({data})
-  io.emit(`get notification::${data.targetUser}`, {
+  const ioInstance = global.io;
+  if (!ioInstance) return;
+  const targetId = data.targetUser || data.recipient;
+  ioInstance.emit(`get notification::${targetId}`, {
     status: 200,
-    message: data.title,
+    message: data.title || data.message,
     data: data,
   });
 };
-
 
 const adminNotificationHandler = (data) => {
-  io.emit(`admin notification`, {
+  const ioInstance = global.io;
+  if (!ioInstance) return;
+  ioInstance.emit(`admin notification`, {
     status: 200,
-    message: data.title,
+    message: data.title || data.message,
     data: data,
   });
 };
 
-
-module.exports = { notificationHandler, EmiteNotificationHandler, adminNotificationHandler };
+module.exports = {
+  notificationHandler,
+  EmiteNotificationHandler,
+  adminNotificationHandler,
+  addNotificationService: createNotificationService
+};

@@ -15,6 +15,7 @@ const earningsRoutes = require('../modules/Earnings/earnings.route');
 const refundRoutes = require('../modules/Booking/refund.route');
 const webhookRoutes = require('../modules/Booking/webhook.route');
 const platformSettingRoutes = require('../modules/PlatformSetting/platformSetting.route');
+const notificationRoutes = require('../modules/Notification/notification.route');
 const { getAdminDashboardOverviewController } = require('../modules/User/user.controller');
 const { tokenCheck } = require('../middlewares/auth');
 
@@ -145,6 +146,14 @@ const moduleRoutes = [
   {
     path: '/fees',
     route: platformSettingRoutes
+  },
+  {
+    path: '/notification',
+    route: notificationRoutes
+  },
+  {
+    path: '/notifications',
+    route: notificationRoutes
   }
 ];
 

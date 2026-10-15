@@ -2078,3 +2078,235 @@ body.full-mode .device-notch {
   padding: 4px;
 }
 
+/* ==========================================================================
+   SCREEN 3: NOTIFICATIONS (Figma 40012289:5166)
+   ========================================================================== */
+#screenNotifications {
+  background: #F9FAFB;
+  display: none;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+#screenNotifications.active-screen {
+  display: flex;
+}
+
+.notifications-top-bar {
+  padding: 50px 20px 16px;
+  background: #FFFFFF;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #E2E8F0;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+.notifications-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.notifications-back-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+  background: #33B4FD;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0px 3px 8px rgba(51, 180, 253, 0.35);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.notifications-back-btn:hover {
+  background: #1ca3ef;
+  transform: scale(1.04);
+}
+
+.notifications-title {
+  font-family: 'Inter Tight', sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  color: #1B1C1C;
+  line-height: 29px;
+  margin: 0;
+}
+
+.btn-mark-all-read {
+  font-family: 'Inter Tight', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: #33B4FD;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 8px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.btn-mark-all-read:hover {
+  background: rgba(51, 180, 253, 0.1);
+  color: #129be6;
+}
+
+.notifications-scroll-body {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 70px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.notification-date-group {
+  margin-bottom: 8px;
+}
+
+.notification-date-group-title {
+  font-family: 'Inter Tight', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #062C4B;
+  padding: 18px 20px 8px;
+  margin: 0;
+}
+
+.notification-group-list {
+  background: #FFFFFF;
+  border-top: 1px solid #F1F5F9;
+  border-bottom: 1px solid #E2E8F0;
+  box-shadow: 0px 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.notification-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 20px;
+  background: #FFFFFF;
+  position: relative;
+  cursor: pointer;
+  border-bottom: 1px solid #E2E8F0;
+  transition: background 0.15s ease;
+}
+
+.notification-row:last-child {
+  border-bottom: none;
+}
+
+.notification-row:hover {
+  background: #F8FAFC;
+}
+
+.notification-row.unread::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 24px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #33B4FD;
+  box-shadow: 0 0 6px rgba(51, 180, 253, 0.6);
+}
+
+.notification-icon-wrap {
+  width: 42px;
+  height: 42px;
+  border-radius: 21px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notification-icon-wrap svg {
+  width: 22px;
+  height: 22px;
+}
+
+.notification-content-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.notification-item-title {
+  font-family: 'Inter Tight', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1E293B;
+  line-height: 20px;
+}
+
+.notification-item-message {
+  font-family: 'Inter Tight', sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  color: #334155;
+  line-height: 20px;
+}
+
+.notification-item-time {
+  font-family: 'Inter Tight', sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  color: #475569;
+  line-height: 16px;
+  margin-top: 2px;
+}
+
+.notifications-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 20px;
+  color: #64748B;
+  font-family: 'Inter Tight', sans-serif;
+  font-size: 14px;
+}
+
+.notifications-empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #64748B;
+  font-family: 'Inter Tight', sans-serif;
+}
+
+.notifications-empty-icon {
+  width: 60px;
+  height: 60px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  background: rgba(51, 180, 253, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #33B4FD;
+}
+
+.notifications-empty-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1E293B;
+  margin-bottom: 6px;
+}
+
+.notifications-empty-desc {
+  font-size: 13px;
+  color: #64748B;
+  max-width: 260px;
+  margin: 0 auto;
+}
+
+
