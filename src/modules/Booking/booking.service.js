@@ -3,6 +3,7 @@ const Booking = require('./booking.model');
 const User = require('../User/user.model');
 const Review = require('../Review/review.model');
 const Chat = require('../Chat/chat.model');
+const Refund = require('./refund.model');
 const ApiError = require('../../helpers/ApiError');
 const { status: httpStatus } = require('http-status');
 const stripeHelper = require('../../helpers/stripe');
@@ -2357,6 +2358,9 @@ const declineBookingService = async (bookingId, instructorId, reason = '') => {
 
   // Process full Stripe refund if payment was already made
   const paymentIntentId = booking.payment?.stripePaymentIntentId || booking.payment?.transactionId;
+  let stripeRefundId = null;
+  let refundStatus = 'Processed';
+
   if (
     booking.payment?.status === 'paid' &&
     totalAmount > 0 &&
@@ -2375,14 +2379,39 @@ const declineBookingService = async (bookingId, instructorId, reason = '') => {
           action: 'instructor_declined'
         }
       });
+      stripeRefundId = refund.id;
       booking.payment.stripeRefundId = refund.id;
       booking.payment.status = 'refunded';
     } catch (refundErr) {
       console.error('Error processing Stripe refund on decline:', refundErr.message);
+      refundStatus = 'Failed';
     }
+  } else if (booking.payment?.status === 'paid' && totalAmount > 0) {
+    booking.payment.status = 'refunded';
   }
 
   await booking.save();
+
+  // Create Refund record in ledger if refund occurred
+  if (booking.payment?.status === 'refunded' || (booking.payment?.status === 'paid' && totalAmount > 0)) {
+    try {
+      await Refund.create({
+        booking: booking._id,
+        bookingId: booking.bookingId || '',
+        client: booking.client?._id || booking.client,
+        instructor: booking.instructor?._id || booking.instructor,
+        amount: totalAmount,
+        source: 'Cancellation',
+        status: refundStatus,
+        date: new Date(),
+        reason: booking.declinedReason || 'Declined by instructor',
+        stripeRefundId: stripeRefundId || booking.payment?.stripeRefundId || null,
+        issuedBy: instructorId || null
+      });
+    } catch (refundCreateErr) {
+      console.error('Error creating Refund record on decline:', refundCreateErr.message);
+    }
+  }
 
   // Trigger Booking Declined & Refund Notifications for client (Figma 40012289:5166)
   try {
@@ -2655,6 +2684,9 @@ const cancelBookingService = async (bookingId, userId, userRole, reason = '') =>
 
   // Process Stripe refund if payment was completed and refundAmount > 0
   const paymentIntentId = booking.payment?.stripePaymentIntentId || booking.payment?.transactionId;
+  let stripeRefundId = null;
+  let refundStatus = 'Processed';
+
   if (
     booking.payment?.status === 'paid' &&
     refundAmount > 0 &&
@@ -2673,14 +2705,39 @@ const cancelBookingService = async (bookingId, userId, userRole, reason = '') =>
           cancellationWindow
         }
       });
+      stripeRefundId = refund.id;
       booking.payment.stripeRefundId = refund.id;
       booking.payment.status = refundAmount >= (booking.pricing?.totalAmount || 0) ? 'refunded' : 'partially_refunded';
     } catch (refundErr) {
       console.error('Error processing Stripe refund on cancellation:', refundErr.message);
+      refundStatus = 'Failed';
     }
+  } else if (booking.payment?.status === 'paid' && refundAmount > 0) {
+    booking.payment.status = refundAmount >= (booking.pricing?.totalAmount || 0) ? 'refunded' : 'partially_refunded';
   }
 
   await booking.save();
+
+  // Create Refund ledger record whenever refundAmount > 0 (Figma Node 40012554:21158)
+  if (refundAmount > 0) {
+    try {
+      await Refund.create({
+        booking: booking._id,
+        bookingId: booking.bookingId || '',
+        client: booking.client?._id || booking.client,
+        instructor: booking.instructor?._id || booking.instructor,
+        amount: refundAmount,
+        source: 'Cancellation',
+        status: refundStatus,
+        date: new Date(),
+        reason: booking.cancellationReason || (booking.cancelledBy === 'instructor' ? 'Cancelled by instructor' : 'Cancelled by client'),
+        stripeRefundId: stripeRefundId || booking.payment?.stripeRefundId || null,
+        issuedBy: userId || null
+      });
+    } catch (refundCreateErr) {
+      console.error('Error creating Refund record on cancellation:', refundCreateErr.message);
+    }
+  }
 
   // Trigger Booking Cancelled & Refund Notifications (Figma 40012289:5166)
   try {

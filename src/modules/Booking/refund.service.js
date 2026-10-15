@@ -29,30 +29,41 @@ const getAdminRefundsLedgerService = async (queryParams = {}) => {
   const limitNum = Math.max(1, parseInt(limit, 10) || 10);
   const skip = (pageNum - 1) * limitNum;
 
-  // Sync historical refunded bookings if Refund collection is completely empty
-  const refundCount = await Refund.countDocuments();
-  if (refundCount === 0) {
-    const historicalRefundedBookings = await Booking.find({
-      $or: [
-        { 'payment.status': { $in: ['refunded', 'partially_refunded'] } },
-        { refundAmount: { $gt: 0 } }
-      ]
-    }).populate('client instructor');
+  // Sync any historical or cancelled bookings with refunds that are not yet in the Refund ledger
+  const refundedBookings = await Booking.find({
+    $or: [
+      { 'payment.status': { $in: ['refunded', 'partially_refunded'] } },
+      { refundAmount: { $gt: 0 }, status: { $in: ['cancelled', 'declined'] } }
+    ]
+  }).populate('client instructor');
 
-    for (const b of historicalRefundedBookings) {
-      const src = b.cancellationReason ? 'Cancellation' : (b.disputeStatus ? 'Dispute' : 'Manual');
-      await Refund.create({
-        booking: b._id,
-        bookingId: b.bookingId || '',
-        client: b.client?._id || b.client,
-        instructor: b.instructor?._id || b.instructor,
-        amount: Number(b.refundAmount || b.pricing?.totalAmount || 0),
-        source: src,
-        status: 'Processed',
-        date: b.updatedAt || b.date || new Date(),
-        reason: b.cancellationReason || 'Booking refund',
-        stripeRefundId: b.payment?.stripeRefundId || null
-      });
+  if (refundedBookings.length > 0) {
+    const existingRefundBookingIds = await Refund.distinct('booking');
+    const existingSet = new Set(existingRefundBookingIds.map((id) => String(id)));
+
+    for (const b of refundedBookings) {
+      if (!existingSet.has(String(b._id))) {
+        const src = (b.cancellationReason || b.status === 'cancelled' || b.status === 'declined')
+          ? 'Cancellation'
+          : (b.disputeStatus ? 'Dispute' : 'Manual');
+        try {
+          await Refund.create({
+            booking: b._id,
+            bookingId: b.bookingId || '',
+            client: b.client?._id || b.client,
+            instructor: b.instructor?._id || b.instructor,
+            amount: Number(b.refundAmount || b.pricing?.totalAmount || 0),
+            source: src,
+            status: 'Processed',
+            date: b.cancelledAt || b.updatedAt || b.date || new Date(),
+            reason: b.cancellationReason || b.declinedReason || 'Booking refund',
+            stripeRefundId: b.payment?.stripeRefundId || null
+          });
+          existingSet.add(String(b._id));
+        } catch (syncErr) {
+          console.error('Error auto-syncing refund into ledger:', syncErr.message);
+        }
+      }
     }
   }
 
