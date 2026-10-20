@@ -103,7 +103,7 @@ const getBookingChat = catchAsync(async (req, res) => {
 
 // Instructor Accepts booking request
 const acceptBooking = catchAsync(async (req, res) => {
-  const result = await acceptBookingService(req.params.id, req.User._id);
+  const result = await acceptBookingService(req.params.id, req.User._id, req.User.role);
   return res.status(status.OK).json(
     response({
       status: 'OK',

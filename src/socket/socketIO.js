@@ -14,15 +14,18 @@ const socketIO = (io) => {
       let userId;
 
       try {
-        userId = socket?.decodedToken?._id;
+        userId = socket?.decodedToken?._id || socket?.decodedToken?.id || socket?.decodedToken?.userId || socket.userId;
         const userFullName = socket?.decodedToken?.fullName || "User";
 
         if (userId) {
           const uKey = userId.toString();
+          socket.userId = uKey;
           connectedUsers.set(uKey, socket.id);
 
-          // Join user's personal private room
+          // Join user's personal private rooms (covers all room naming patterns)
           socket.join(`user::${uKey}`);
+          socket.join(uKey);
+          socket.join(`user_${uKey}`);
 
           // Broadcast user online status
           io.emit("userOnline", {
@@ -35,6 +38,35 @@ const socketIO = (io) => {
           // Also emit list of all online user IDs
           io.emit("connectUser", Array.from(connectedUsers.keys()));
         }
+
+        // Handle explicit client room join events
+        const handleJoinUserRoom = (data, cb) => {
+          const target = typeof data === "string" ? data : (data?.userId || userId);
+          if (target) {
+            const sKey = target.toString();
+            socket.userId = sKey;
+            connectedUsers.set(sKey, socket.id);
+            socket.join(`user::${sKey}`);
+            socket.join(sKey);
+            socket.join(`user_${sKey}`);
+            if (typeof cb === 'function') {
+              cb({ status: 200, message: `Joined user room ${sKey}`, userId: sKey });
+            }
+          }
+        };
+
+        socket.on("join", handleJoinUserRoom);
+        socket.on("joinNotification", handleJoinUserRoom);
+        socket.on("joinUser", handleJoinUserRoom);
+
+        socket.on("joinBooking", (data) => {
+          const { bookingId } = typeof data === "string" ? { bookingId: data } : (data || {});
+          if (bookingId) {
+            socket.join(`booking::${bookingId}`);
+            socket.join(bookingId.toString());
+            socket.join(`booking_${bookingId}`);
+          }
+        });
 
         // 1. Mount Chat Socket Features (SendMessage, JoinChat, Typing, MarkAsRead, etc.)
         try {

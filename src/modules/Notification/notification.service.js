@@ -100,7 +100,8 @@ function getTypeIconConfig(type) {
 }
 
 /**
- * Format notification document into clean frontend payload
+ * Format notification document into clean frontend payload matching Figma Node 40012289:5166
+ * Eliminates all unnecessary fields (sender, recipient, readAt, updatedAt, relativeTime)
  */
 function formatNotificationItem(doc) {
   const plain = doc.toObject ? doc.toObject() : doc;
@@ -110,28 +111,16 @@ function formatNotificationItem(doc) {
   return {
     _id: plain._id,
     id: plain._id,
-    recipient: plain.recipient?._id || plain.recipient,
-    sender: plain.sender
-      ? {
-          _id: plain.sender._id || plain.sender,
-          fullName: plain.sender.fullName || '',
-          image: plain.sender.image || '',
-          email: plain.sender.email || ''
-        }
-      : null,
     title: plain.title,
     message: plain.message,
-    type: plain.type,
+    time: timeFormatted,
+    dateGroup,
+    isRead: Boolean(plain.isRead),
     icon: plain.icon,
     iconBg: plain.iconBg,
-    isRead: Boolean(plain.isRead),
-    readAt: plain.readAt,
+    type: plain.type,
     data: plain.data || {},
-    time: timeFormatted,
-    relativeTime: timeFormatted,
-    dateGroup,
-    createdAt: plain.createdAt,
-    updatedAt: plain.updatedAt
+    createdAt: plain.createdAt
   };
 }
 
@@ -150,7 +139,10 @@ const createNotificationService = async (payload) => {
     iconBg
   } = payload;
 
-  if (!recipient || !mongoose.Types.ObjectId.isValid(recipient)) {
+  const recipientId = (recipient && recipient._id) ? recipient._id : recipient;
+  const senderId = (sender && sender._id) ? sender._id : sender;
+
+  if (!recipientId || !mongoose.Types.ObjectId.isValid(recipientId)) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Valid recipient ID is required');
   }
 
@@ -161,8 +153,8 @@ const createNotificationService = async (payload) => {
   const defaultStyles = getTypeIconConfig(type);
 
   const notification = await Notification.create({
-    recipient,
-    sender: sender && mongoose.Types.ObjectId.isValid(sender) ? sender : null,
+    recipient: recipientId,
+    sender: senderId && mongoose.Types.ObjectId.isValid(senderId) ? senderId : null,
     title: String(title).trim(),
     message: String(message).trim(),
     type,
@@ -172,42 +164,76 @@ const createNotificationService = async (payload) => {
     isRead: false
   });
 
-  const populated = await Notification.findById(notification._id)
-    .populate('sender', 'fullName image email')
-    .populate('recipient', 'fullName email enabledPushNotification');
+  const formatted = formatNotificationItem(notification);
 
-  const formatted = formatNotificationItem(populated);
-
-  // Real-time socket delivery
+  // Real-time socket delivery across user rooms
   try {
-    if (global.io) {
-      const recipientStr = recipient.toString();
+    const ioInstance = global.io;
+    if (ioInstance) {
+      const recipientStr = recipientId.toString();
 
-      // Emit targeted user notification
-      global.io.emit(`get notification::${recipientStr}`, {
-        status: 200,
-        message: formatted.title,
-        data: formatted
-      });
-
-      // Emit to private room if user joined
-      global.io.to(`user::${recipientStr}`).emit('newNotification', {
-        status: 200,
-        data: formatted
-      });
-
-      // Calculate fresh unread count and emit badge update
+      // 1. Calculate unread count for badge
       const unreadCount = await Notification.countDocuments({
-        recipient,
+        recipient: recipientId,
         isRead: false
       });
 
-      global.io.emit(`notificationCount::${recipientStr}`, {
-        unreadCount
-      });
-      global.io.to(`user::${recipientStr}`).emit('notificationCount', {
-        unreadCount
-      });
+      // EVENT 1: 'notification' - Emitted EXACTLY ONCE to the recipient
+      ioInstance
+        .to(`user::${recipientStr}`)
+        .to(recipientStr)
+        .to(`user_${recipientStr}`)
+        .emit('notification', formatted);
+
+      // Support dynamic event name for clients listening to notification::<userId>
+      ioInstance.emit(`notification::${recipientStr}`, formatted);
+
+      // EVENT 2: 'notificationCount' - Emitted EXACTLY ONCE to the recipient
+      const countPayload = {
+        unreadCount,
+        count: unreadCount,
+        userId: recipientStr
+      };
+
+      ioInstance
+        .to(`user::${recipientStr}`)
+        .to(recipientStr)
+        .to(`user_${recipientStr}`)
+        .emit('notificationCount', countPayload);
+
+      // Support dynamic event name for count
+      ioInstance.emit(`notificationCount::${recipientStr}`, countPayload);
+
+      // EVENT 3: If booking related, emit real-time booking update event
+      const bookingId = data?.bookingId || data?.booking?._id;
+      if (bookingId) {
+        const bIdStr = bookingId.toString();
+        const bookingUpdatePayload = {
+          bookingId: bIdStr,
+          bookingReference: data.bookingReference || '',
+          status: type === 'booking_confirmed' ? 'accepted' : (type === 'booking_declined' ? 'declined' : (type === 'booking_cancelled' ? 'cancelled' : 'updated')),
+          displayStatus: type === 'booking_confirmed' ? 'upcoming' : type,
+          message: formatted.message,
+          data
+        };
+
+        ioInstance.emit(`bookingStatusUpdate::${bIdStr}`, bookingUpdatePayload);
+        ioInstance.emit(`bookingStatusUpdate::${recipientStr}`, bookingUpdatePayload);
+        ioInstance
+          .to(`user::${recipientStr}`)
+          .to(recipientStr)
+          .to(`user_${recipientStr}`)
+          .to(`booking::${bIdStr}`)
+          .emit('bookingStatusUpdate', bookingUpdatePayload);
+
+        if (type === 'booking_confirmed') {
+          ioInstance
+            .to(`user::${recipientStr}`)
+            .to(recipientStr)
+            .to(`user_${recipientStr}`)
+            .emit('bookingAccepted', bookingUpdatePayload);
+        }
+      }
     }
   } catch (socketErr) {
     console.error('Socket notification emit error:', socketErr.message);
@@ -248,8 +274,7 @@ const getMyNotificationsService = async (userId, query = {}) => {
   const docs = await Notification.find(filter)
     .sort({ createdAt: -1 })
     .skip(skip)
-    .limit(limit)
-    .populate('sender', 'fullName image email');
+    .limit(limit);
 
   const formattedItems = docs.map(formatNotificationItem);
 
@@ -328,12 +353,21 @@ const markNotificationAsReadService = async (userId, notificationId) => {
     isRead: false
   });
 
-  // Emit updated count
+  // Emit updated count across all user room patterns
   try {
-    if (global.io) {
+    const ioInstance = global.io;
+    if (ioInstance) {
       const recipientStr = userId.toString();
-      global.io.emit(`notificationCount::${recipientStr}`, { unreadCount });
-      global.io.to(`user::${recipientStr}`).emit('notificationCount', { unreadCount });
+      const countPayload = { status: 200, unreadCount, count: unreadCount };
+
+      ioInstance.emit(`notificationCount::${recipientStr}`, countPayload);
+      ioInstance.emit(`unreadNotificationCount::${recipientStr}`, countPayload);
+
+      ioInstance
+        .to(`user::${recipientStr}`)
+        .to(recipientStr)
+        .to(`user_${recipientStr}`)
+        .emit('notificationCount', countPayload);
     }
   } catch (err) {
     console.error('Socket count emit error:', err.message);
@@ -359,12 +393,20 @@ const markAllNotificationsAsReadService = async (userId) => {
     { $set: { isRead: true, readAt: new Date() } }
   );
 
-  // Emit 0 unread badge count via socket
+  // Emit 0 unread badge count via socket to all user room patterns
   try {
-    if (global.io) {
+    const ioInstance = global.io;
+    if (ioInstance) {
       const recipientStr = userId.toString();
-      global.io.emit(`notificationCount::${recipientStr}`, { unreadCount: 0 });
-      global.io.to(`user::${recipientStr}`).emit('notificationCount', { unreadCount: 0 });
+      const zeroPayload = { status: 200, unreadCount: 0, count: 0, userId: recipientStr };
+
+      ioInstance.emit(`notificationCount::${recipientStr}`, zeroPayload);
+
+      ioInstance
+        .to(`user::${recipientStr}`)
+        .to(recipientStr)
+        .to(`user_${recipientStr}`)
+        .emit('notificationCount', zeroPayload);
     }
   } catch (err) {
     console.error('Socket count emit error:', err.message);
@@ -402,6 +444,22 @@ const deleteNotificationService = async (userId, notificationId) => {
     isRead: false
   });
 
+  try {
+    const ioInstance = global.io;
+    if (ioInstance) {
+      const recipientStr = userId.toString();
+      const countPayload = { unreadCount, count: unreadCount, userId: recipientStr };
+
+      ioInstance.emit(`notificationCount::${recipientStr}`, countPayload);
+
+      ioInstance
+        .to(`user::${recipientStr}`)
+        .to(recipientStr)
+        .to(`user_${recipientStr}`)
+        .emit('notificationCount', countPayload);
+    }
+  } catch (err) {}
+
   return {
     message: 'Notification deleted successfully',
     unreadCount
@@ -417,6 +475,22 @@ const clearAllNotificationsService = async (userId) => {
   }
 
   const result = await Notification.deleteMany({ recipient: userId });
+
+  try {
+    const ioInstance = global.io;
+    if (ioInstance) {
+      const recipientStr = userId.toString();
+      const zeroPayload = { unreadCount: 0, count: 0, userId: recipientStr };
+
+      ioInstance.emit(`notificationCount::${recipientStr}`, zeroPayload);
+
+      ioInstance
+        .to(`user::${recipientStr}`)
+        .to(recipientStr)
+        .to(`user_${recipientStr}`)
+        .emit('notificationCount', zeroPayload);
+    }
+  } catch (err) {}
 
   return {
     message: 'All notifications cleared successfully',

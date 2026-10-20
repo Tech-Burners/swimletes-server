@@ -3,12 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Swimletes - Real-Time Socket.IO Tester</title>
+  <title>Swimletes - Real-Time Socket.IO Notification & Booking Tester</title>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <style>
     :root {
-      --bg: #0f172a;
+      --bg: #0b1120;
       --card: #1e293b;
+      --card-alt: #162032;
       --border: #334155;
       --primary: #38bdf8;
       --primary-hover: #0284c7;
@@ -16,6 +17,8 @@
       --text-muted: #94a3b8;
       --green: #22c55e;
       --red: #ef4444;
+      --amber: #f59e0b;
+      --indigo: #6366f1;
       --bubble-me: #0284c7;
       --bubble-other: #334155;
     }
@@ -23,60 +26,100 @@
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { background: var(--bg); color: var(--text); padding: 24px; min-height: 100vh; }
 
-    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; border-bottom: 1px solid var(--border); padding-bottom: 16px; }
-    h1 { font-size: 20px; font-weight: 700; color: var(--primary); }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; border-bottom: 1px solid var(--border); padding-bottom: 16px; flex-wrap: wrap; gap: 12px; }
+    h1 { font-size: 20px; font-weight: 700; color: var(--primary); display: flex; align-items: center; gap: 8px; }
     .status-badge { padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; background: var(--border); color: var(--text-muted); }
     .status-badge.connected { background: rgba(34, 197, 94, 0.2); color: var(--green); border: 1px solid var(--green); }
 
+    .toast-container { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; max-width: 420px; }
+    .toast { background: #1e293b; border: 1px solid var(--primary); border-left: 6px solid var(--primary); color: #fff; padding: 14px 16px; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: flex; align-items: flex-start; gap: 12px; animation: slideIn 0.3s ease; }
+    .toast.success { border-color: var(--green); border-left-color: var(--green); }
+    .toast-icon { font-size: 20px; }
+    .toast-content { flex: 1; }
+    .toast-title { font-weight: 700; font-size: 13px; color: #fff; }
+    .toast-desc { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
 
     .form-group { display: flex; flex-direction: column; gap: 6px; }
-    label { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; }
-    input, textarea, select { background: #0f172a; border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 10px 12px; font-size: 13px; outline: none; }
+    label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    input, textarea, select { background: #0f172a; border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 9px 12px; font-size: 13px; outline: none; }
     input:focus, textarea:focus { border-color: var(--primary); }
 
-    .btn { background: var(--primary); color: #000; border: none; border-radius: 8px; padding: 10px 16px; font-weight: 600; font-size: 13px; cursor: pointer; transition: 0.2s; }
+    .btn { background: var(--primary); color: #000; border: none; border-radius: 8px; padding: 9px 14px; font-weight: 600; font-size: 12px; cursor: pointer; transition: 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
     .btn:hover { background: var(--primary-hover); color: #fff; }
     .btn-danger { background: var(--red); color: #fff; }
+    .btn-success { background: var(--green); color: #000; font-weight: 700; }
+    .btn-success:hover { background: #16a34a; color: #fff; }
     .btn-secondary { background: var(--border); color: var(--text); }
     .btn-secondary:hover { background: #475569; color: #fff; }
-    .btn-row { display: flex; gap: 8px; }
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
 
-    .chat-box { height: 260px; background: #0b1120; border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-    .msg { max-width: 80%; padding: 8px 12px; border-radius: 8px; font-size: 13px; line-height: 1.4; word-break: break-word; }
+    .nav-tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 4px; }
+    .tab-btn { background: transparent; border: none; color: var(--text-muted); font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+    .tab-btn.active { background: var(--border); color: var(--primary); }
+
+    .bell-badge-wrap { display: flex; align-items: center; justify-content: space-between; background: var(--card-alt); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+    .bell-icon { font-size: 22px; position: relative; display: inline-block; }
+    .bell-count { position: absolute; top: -6px; right: -10px; background: var(--red); color: #fff; font-size: 10px; font-weight: 700; border-radius: 10px; padding: 2px 6px; min-width: 18px; text-align: center; }
+
+    .notification-list { height: 200px; background: #0b1120; border: 1px solid var(--border); border-radius: 8px; padding: 8px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+    .notif-item { background: #1e293b; border-left: 4px solid var(--primary); border-radius: 6px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; transition: 0.2s; }
+    .notif-item.booking-confirmed { border-left-color: var(--green); }
+    .notif-item.booking-declined { border-left-color: var(--red); }
+    .notif-header { display: flex; justify-content: space-between; font-weight: 700; color: #fff; font-size: 13px; }
+    .notif-body { color: var(--text-muted); line-height: 1.3; }
+    .notif-time { font-size: 10px; color: #64748b; margin-top: 2px; }
+
+    .chat-box { height: 180px; background: #0b1120; border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+    .msg { max-width: 80%; padding: 8px 12px; border-radius: 8px; font-size: 12px; line-height: 1.4; word-break: break-word; }
     .msg.me { align-self: flex-end; background: var(--bubble-me); color: #fff; }
     .msg.other { align-self: flex-start; background: var(--bubble-other); color: var(--text); }
-    .msg-meta { font-size: 10px; opacity: 0.8; margin-top: 4px; display: flex; justify-content: space-between; gap: 8px; }
-    .msg-status { font-weight: bold; }
+    .msg-meta { font-size: 9px; opacity: 0.8; margin-top: 3px; display: flex; justify-content: space-between; gap: 8px; }
 
-    .typing-indicator { font-size: 12px; color: var(--primary); font-style: italic; min-height: 18px; padding-left: 4px; transition: opacity 0.2s; }
-
-    .log-box { height: 160px; background: #000; border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-family: monospace; font-size: 11px; overflow-y: auto; color: #a3e635; }
-    .log-line { margin-bottom: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 2px; }
+    .typing-indicator { font-size: 11px; color: var(--primary); font-style: italic; min-height: 16px; padding-left: 4px; }
+    .log-box { height: 140px; background: #000; border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-family: monospace; font-size: 11px; overflow-y: auto; color: #a3e635; }
+    .log-line { margin-bottom: 3px; border-bottom: 1px solid #1e293b; padding-bottom: 2px; }
     .log-line.event { color: var(--primary); }
+    .log-line.notif { color: #f43f5e; font-weight: bold; }
+    .log-line.booking { color: #22c55e; font-weight: bold; }
+
+    .sim-box { background: rgba(56, 189, 248, 0.05); border: 1px dashed var(--primary); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
   </style>
 </head>
 <body>
 
+  <div class="toast-container" id="toastContainer"></div>
+
   <header>
     <div>
-      <h1>🏊‍♂️ Swimletes Socket.IO Real-Time Tester</h1>
-      <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Target Socket Server: <strong>http://localhost:3049</strong> (Chat Rooms & Events)</p>
+      <h1>🏊‍♂️ Swimletes Real-Time Socket Notification & Booking Tester</h1>
+      <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+        Test real-time notifications via Socket: when a booking is approved/accepted, user receives notification immediately without reload.
+      </p>
+    </div>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <label style="margin:0;">Socket Host:</label>
+      <input type="text" id="socketHostInput" style="width:200px;" value="" />
+      <button class="btn btn-secondary" onclick="updateHost()">Apply Host</button>
     </div>
   </header>
 
   <div class="grid">
-    <!-- USER 1 -->
+    <!-- CLIENT 1: Swimmer / Client -->
     <div class="card" id="client1">
       <div style="display:flex; justify-content:space-between; align-items:center;">
-        <h3>👤 Client 1 (e.g. Coach / User A)</h3>
+        <h3 style="display:flex; align-items:center; gap:6px;">👤 Client 1 (Swimmer / Parent)</h3>
         <span class="status-badge" id="c1-status">Disconnected</span>
       </div>
 
       <div class="form-group">
-        <label>JWT Access Token</label>
-        <input type="text" id="c1-token" placeholder="Bearer eyJhbGciOiJIUzI1Ni..." />
+        <label>JWT Access Token or User ID</label>
+        <input type="text" id="c1-token" placeholder="Bearer eyJhbGci... OR MongoDB ObjectId" />
       </div>
 
       <div class="btn-row">
@@ -84,12 +127,46 @@
         <button class="btn btn-danger" onclick="disconnectSocket(1)">Disconnect</button>
       </div>
 
-      <div class="form-group">
-        <label>Room (chatId)</label>
+      <!-- Real-Time Notification Section -->
+      <div class="bell-badge-wrap">
+        <div style="display:flex; align-items:center; gap:14px;">
+          <div class="bell-icon">
+            🔔
+            <span class="bell-count" id="c1-bell-count">0</span>
+          </div>
+          <div>
+            <div style="font-size: 13px; font-weight: 700;">Real-Time Notifications</div>
+            <div style="font-size: 11px; color: var(--text-muted);" id="c1-notif-subtitle">Listening for immediate socket notifications...</div>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-secondary" style="font-size:11px; padding:5px 9px;" onclick="fetchNotificationsSocket(1)">Fetch (Socket)</button>
+          <button class="btn btn-secondary" style="font-size:11px; padding:5px 9px;" onclick="markAllReadSocket(1)">Mark All Read</button>
+        </div>
+      </div>
+
+      <div class="notification-list" id="c1-notifications">
+        <div style="color:var(--text-muted); font-size:11px; text-align:center; padding:20px;">No notifications received yet. Connect socket to listen for real-time notifications.</div>
+      </div>
+
+      <!-- Booking Approval Simulation Form -->
+      <div class="sim-box">
+        <div style="font-size: 12px; font-weight:700; color:var(--primary);">⚡ Booking Approval Simulator</div>
+        <p style="font-size: 11px; color:var(--text-muted);">
+          Trigger a booking approval. If Client 1 is connected, they will receive the notification immediately below without reloading!
+        </p>
         <div style="display:flex; gap:8px;">
-          <input type="text" id="c1-chatId" placeholder="e.g. 6a9d3f5dcae1e9d54fac171f" style="flex:1;" />
+          <input type="text" id="c1-bookingId" placeholder="Booking ID (e.g. 68fc00... or SW-12345)" style="flex:1;" />
+          <button class="btn btn-success" onclick="approveBookingApi(1)">Approve Booking</button>
+        </div>
+      </div>
+
+      <!-- Chat / Messaging -->
+      <div class="form-group">
+        <label>Room (chatId) & Chat</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="c1-chatId" placeholder="Chat ID" style="flex:1;" />
           <button class="btn btn-secondary" onclick="joinRoom(1)">Join Room</button>
-          <button class="btn btn-secondary" onclick="markAsRead(1)" title="Mark all messages in this chat as read">Mark Read (✓✓)</button>
         </div>
       </div>
 
@@ -97,9 +174,8 @@
       <div class="typing-indicator" id="c1-typing-indicator"></div>
 
       <div class="form-group">
-        <label>Send Message</label>
         <div style="display:flex; gap:8px;">
-          <input type="text" id="c1-input" placeholder="Type a message (triggers typing indicator)..." style="flex:1;" oninput="handleTyping(1)" />
+          <input type="text" id="c1-input" placeholder="Type a message..." style="flex:1;" oninput="handleTyping(1)" />
           <button class="btn" onclick="sendMsg(1)">Send</button>
         </div>
       </div>
@@ -110,16 +186,16 @@
       </div>
     </div>
 
-    <!-- USER 2 -->
+    <!-- CLIENT 2: Instructor / Coach -->
     <div class="card" id="client2">
       <div style="display:flex; justify-content:space-between; align-items:center;">
-        <h3>👤 Client 2 (e.g. Swimmer / User B)</h3>
+        <h3 style="display:flex; align-items:center; gap:6px;">🏊 Coach / Instructor (Client 2)</h3>
         <span class="status-badge" id="c2-status">Disconnected</span>
       </div>
 
       <div class="form-group">
-        <label>JWT Access Token</label>
-        <input type="text" id="c2-token" placeholder="Bearer eyJhbGciOiJIUzI1Ni..." />
+        <label>JWT Access Token or User ID</label>
+        <input type="text" id="c2-token" placeholder="Bearer eyJhbGci... OR MongoDB ObjectId" />
       </div>
 
       <div class="btn-row">
@@ -127,12 +203,44 @@
         <button class="btn btn-danger" onclick="disconnectSocket(2)">Disconnect</button>
       </div>
 
-      <div class="form-group">
-        <label>Room (chatId)</label>
+      <!-- Real-Time Notification Section -->
+      <div class="bell-badge-wrap">
+        <div style="display:flex; align-items:center; gap:14px;">
+          <div class="bell-icon">
+            🔔
+            <span class="bell-count" id="c2-bell-count">0</span>
+          </div>
+          <div>
+            <div style="font-size: 13px; font-weight: 700;">Real-Time Notifications</div>
+            <div style="font-size: 11px; color: var(--text-muted);" id="c2-notif-subtitle">Instructor notification channel</div>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-secondary" style="font-size:11px; padding:5px 9px;" onclick="fetchNotificationsSocket(2)">Fetch (Socket)</button>
+          <button class="btn btn-secondary" style="font-size:11px; padding:5px 9px;" onclick="markAllReadSocket(2)">Mark All Read</button>
+        </div>
+      </div>
+
+      <div class="notification-list" id="c2-notifications">
+        <div style="color:var(--text-muted); font-size:11px; text-align:center; padding:20px;">No notifications received yet.</div>
+      </div>
+
+      <!-- Quick Notification Push test -->
+      <div class="sim-box">
+        <div style="font-size: 12px; font-weight:700; color:var(--primary);">⚡ Push Custom Notification via Socket</div>
         <div style="display:flex; gap:8px;">
-          <input type="text" id="c2-chatId" placeholder="e.g. 6a9d3f5dcae1e9d54fac171f" style="flex:1;" />
+          <input type="text" id="c2-targetUser" placeholder="Target Recipient User ID" style="flex:1;" />
+          <input type="text" id="c2-notifMsg" placeholder="Notification message" style="flex:1;" />
+          <button class="btn btn-secondary" onclick="pushNotificationSocket(2)">Push</button>
+        </div>
+      </div>
+
+      <!-- Chat / Messaging -->
+      <div class="form-group">
+        <label>Room (chatId) & Chat</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="c2-chatId" placeholder="Chat ID" style="flex:1;" />
           <button class="btn btn-secondary" onclick="joinRoom(2)">Join Room</button>
-          <button class="btn btn-secondary" onclick="markAsRead(2)" title="Mark all messages in this chat as read">Mark Read (✓✓)</button>
         </div>
       </div>
 
@@ -140,9 +248,8 @@
       <div class="typing-indicator" id="c2-typing-indicator"></div>
 
       <div class="form-group">
-        <label>Send Message</label>
         <div style="display:flex; gap:8px;">
-          <input type="text" id="c2-input" placeholder="Type a message (triggers typing indicator)..." style="flex:1;" oninput="handleTyping(2)" />
+          <input type="text" id="c2-input" placeholder="Type a message..." style="flex:1;" oninput="handleTyping(2)" />
           <button class="btn" onclick="sendMsg(2)">Send</button>
         </div>
       </div>
@@ -156,29 +263,107 @@
 
   <script>
     const sockets = { 1: null, 2: null };
-    const socketUrl = 'http://localhost:3049';
+    const socketTokens = { 1: '', 2: '' };
 
-    function log(clientNum, text, isEvent = false) {
+    // Default socket URL to current origin or port 8049/3049
+    let socketUrl = window.location.origin;
+    if (!socketUrl || socketUrl.startsWith('file')) {
+      socketUrl = 'http://localhost:8049';
+    }
+    document.getElementById('socketHostInput').value = socketUrl;
+
+    function updateHost() {
+      const val = document.getElementById('socketHostInput').value.trim();
+      if (val) {
+        socketUrl = val;
+        alert('Socket Host set to: ' + socketUrl);
+      }
+    }
+
+    function showToast(title, message, isSuccess = true) {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = 'toast' + (isSuccess ? ' success' : '');
+      toast.innerHTML = `
+        <div class="toast-icon">${isSuccess ? '🎉' : '🔔'}</div>
+        <div class="toast-content">
+          <div class="toast-title">${title}</div>
+          <div class="toast-desc">${message}</div>
+        </div>
+      `;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(100%)';
+        toast.style.transition = '0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+      }, 5000);
+    }
+
+    function log(clientNum, text, category = 'default') {
       const el = document.getElementById(`c${clientNum}-logs`);
       const time = new Date().toLocaleTimeString();
       const div = document.createElement('div');
-      div.className = 'log-line' + (isEvent ? ' event' : '');
+      div.className = 'log-line ' + category;
       div.textContent = `[${time}] ${text}`;
       el.appendChild(div);
       el.scrollTop = el.scrollHeight;
     }
 
-    function connectSocket(clientNum) {
-      const token = document.getElementById(`c${clientNum}-token`).value.trim();
-      if (!token) {
-        alert('Please enter a JWT Access Token first!');
-        return;
+    function renderNotification(clientNum, notif) {
+      const box = document.getElementById(`c${clientNum}-notifications`);
+      // Remove empty placeholder
+      if (box.querySelector('div') && box.querySelector('div').textContent.includes('No notifications')) {
+        box.innerHTML = '';
       }
 
-      log(clientNum, `Connecting to ${socketUrl}...`);
+      const item = document.createElement('div');
+      const isBookingConfirmed = (notif.type === 'booking_confirmed' || (notif.title && notif.title.toLowerCase().includes('confirmed')));
+      const isBookingDeclined = (notif.type === 'booking_declined' || (notif.title && notif.title.toLowerCase().includes('declined')));
+
+      item.className = 'notif-item ' + (isBookingConfirmed ? 'booking-confirmed' : (isBookingDeclined ? 'booking-declined' : ''));
+      const time = notif.time || notif.relativeTime || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      item.innerHTML = `
+        <div class="notif-header">
+          <span>${isBookingConfirmed ? '✅ ' : '🔔 '}${notif.title || 'Notification'}</span>
+          <span style="font-size:10px; font-weight:normal; color:#94a3b8;">${time}</span>
+        </div>
+        <div class="notif-body">${notif.message || ''}</div>
+        ${notif.data?.bookingReference ? `<div class="notif-time">Booking Ref: <strong>${notif.data.bookingReference}</strong></div>` : ''}
+      `;
+
+      box.prepend(item);
+    }
+
+    function setBadgeCount(clientNum, count) {
+      const badge = document.getElementById(`c${clientNum}-bell-count`);
+      badge.textContent = count || 0;
+      badge.style.display = count > 0 ? 'inline-block' : 'none';
+      if (count > 0) {
+        badge.style.transform = 'scale(1.2)';
+        setTimeout(() => badge.style.transform = 'scale(1)', 200);
+      }
+    }
+
+    function connectSocket(clientNum) {
+      const tokenInput = document.getElementById(`c${clientNum}-token`).value.trim();
+      if (!tokenInput) {
+        alert('Please enter a JWT Access Token or User ID first!');
+        return;
+      }
+      socketTokens[clientNum] = tokenInput;
+
+      log(clientNum, `Connecting to socket server: ${socketUrl}...`);
+
+      const isJwt = tokenInput.includes('.');
+      const authPayload = isJwt
+        ? { token: tokenInput.startsWith('Bearer ') ? tokenInput : 'Bearer ' + tokenInput }
+        : { userId: tokenInput };
 
       const socket = io(socketUrl, {
-        auth: { token: token.startsWith('Bearer ') ? token : 'Bearer ' + token },
+        auth: authPayload,
+        query: authPayload,
         transports: ['websocket', 'polling']
       });
 
@@ -188,60 +373,99 @@
         const badge = document.getElementById(`c${clientNum}-status`);
         badge.textContent = '🟢 Connected (' + socket.id.substring(0, 8) + '...)';
         badge.className = 'status-badge connected';
-        log(clientNum, `Connected with socket ID: ${socket.id}`, true);
+        log(clientNum, `Connected successfully! Socket ID: ${socket.id}`, 'event');
+
+        // Automatically fetch initial unread notification count
+        socket.emit('getUnreadCount', (res) => {
+          if (res?.unreadCount !== undefined) {
+            setBadgeCount(clientNum, res.unreadCount);
+          }
+        });
       });
 
       socket.on('connect_error', (err) => {
-        log(clientNum, `Connection error: ${err.message}`);
+        log(clientNum, `Connection error: ${err.message}`, 'default');
       });
 
       socket.on('disconnect', (reason) => {
         const badge = document.getElementById(`c${clientNum}-status`);
         badge.textContent = 'Disconnected';
         badge.className = 'status-badge';
-        log(clientNum, `Disconnected: ${reason}`);
+        log(clientNum, `Disconnected: ${reason}`, 'default');
       });
 
-      // 1. Listen for new messages ('message' event)
+      // ==========================================
+      // REAL-TIME NOTIFICATION LISTENERS
+      // ==========================================
+
+      // 1. New Notification Received
+      const handleNewNotif = (payload) => {
+        const notif = payload.data || payload.notification || payload;
+        log(clientNum, `🔔 NEW NOTIFICATION RECEIVED: "${notif.title} - ${notif.message}"`, 'notif');
+        renderNotification(clientNum, notif);
+        showToast(notif.title || 'New Notification', notif.message || 'You received a new update!');
+
+        // Increment or refresh badge
+        const currentBadge = parseInt(document.getElementById(`c${clientNum}-bell-count`).textContent || '0', 10);
+        setBadgeCount(clientNum, currentBadge + 1);
+      };
+
+      socket.on('newNotification', handleNewNotif);
+      socket.on('notification', handleNewNotif);
+      socket.on('get notification', handleNewNotif);
+
+      // Listen on dynamic pattern event if token has decoded userId
+      if (!isJwt) {
+        socket.on(`get notification::${tokenInput}`, handleNewNotif);
+        socket.on(`notification::${tokenInput}`, handleNewNotif);
+      }
+
+      // 2. Real-Time Badge Count Update
+      const handleCountUpdate = (data) => {
+        const unreadCount = data.unreadCount !== undefined ? data.unreadCount : (data.count || 0);
+        log(clientNum, `🔢 Badge count updated via socket: ${unreadCount}`, 'event');
+        setBadgeCount(clientNum, unreadCount);
+      };
+
+      socket.on('notificationCount', handleCountUpdate);
+      socket.on('unreadCount', handleCountUpdate);
+      socket.on('unreadNotificationCount', handleCountUpdate);
+      if (!isJwt) {
+        socket.on(`notificationCount::${tokenInput}`, handleCountUpdate);
+      }
+
+      // 3. Real-Time Booking Approved / Status Update
+      const handleBookingUpdate = (data) => {
+        log(clientNum, `🏊 REAL-TIME BOOKING UPDATE: Booking ${data.bookingId} is now '${data.status || data.bookingStatus}'!`, 'booking');
+        showToast('🎉 Booking Approved!', `Your booking #${data.bookingReference || data.bookingId} has been confirmed without reload!`, true);
+      };
+
+      socket.on('bookingAccepted', handleBookingUpdate);
+      socket.on('bookingApproved', handleBookingUpdate);
+      socket.on('bookingStatusUpdate', handleBookingUpdate);
+      socket.on('bookingUpdated', handleBookingUpdate);
+
+      // 4. Chat Message Listeners
       socket.on('message', (msg) => {
-        log(clientNum, `📩 message from ${msg.sender?.fullName || 'Other'}: "${msg.text}"`, true);
+        log(clientNum, `📩 Chat message from ${msg.sender?.fullName || 'User'}: "${msg.text}"`, 'event');
         appendMessage(clientNum, msg.text, msg.sender?.fullName || 'Other', false);
       });
 
-      // 2. Real-Time Typing Indicator (userTyping event)
       socket.on('userTyping', (data) => {
         const indicator = document.getElementById(`c${clientNum}-typing-indicator`);
         if (data.isTyping) {
           indicator.textContent = `✍️ ${data.fullName || 'User'} is typing...`;
-          log(clientNum, `✍️ ${data.fullName || 'User'} is typing...`, true);
         } else {
           indicator.textContent = '';
         }
       });
 
-      // 3. Real-Time Read Receipts (messagesRead event)
-      socket.on('messagesRead', (data) => {
-        log(clientNum, `👁️ messagesRead: All messages read in room ${data.chatId}`, true);
-        // Update all sent messages from "✓ Sent" to "✓✓ Read"
-        const statuses = document.querySelectorAll(`#c${clientNum}-messages .msg.me .msg-status`);
-        statuses.forEach(s => {
-          s.textContent = '✓✓ Read';
-          s.style.color = '#38bdf8';
-        });
-      });
-
-      // 4. Chat List / Badge count update
-      socket.on('chatListUpdate', (data) => {
-        log(clientNum, `📬 chatListUpdate: Chat ${data.chatId} unreadCount: ${data.unreadCount}`, true);
-      });
-
-      // 5. Online/Offline events
       socket.on('userOnline', (data) => {
-        log(clientNum, `🟢 userOnline: ${data.fullName || data.userId}`, true);
+        log(clientNum, `🟢 Online: ${data.fullName || data.userId}`, 'default');
       });
 
       socket.on('userOffline', (data) => {
-        log(clientNum, `🔴 userOffline: ${data.userId}`, true);
+        log(clientNum, `🔴 Offline: ${data.userId}`, 'default');
       });
     }
 
@@ -252,6 +476,98 @@
       }
     }
 
+    // Fetch Notifications via Socket
+    function fetchNotificationsSocket(clientNum) {
+      const socket = sockets[clientNum];
+      if (!socket || !socket.connected) {
+        alert('Socket not connected!');
+        return;
+      }
+      socket.emit('getNotifications', { limit: 10 }, (res) => {
+        log(clientNum, `getNotifications ack: ` + JSON.stringify(res), 'event');
+        if (res?.data?.notifications) {
+          const box = document.getElementById(`c${clientNum}-notifications`);
+          box.innerHTML = '';
+          res.data.notifications.forEach(n => renderNotification(clientNum, n));
+        }
+        if (res?.data?.unreadCount !== undefined) {
+          setBadgeCount(clientNum, res.data.unreadCount);
+        }
+      });
+    }
+
+    // Mark All Read via Socket
+    function markAllReadSocket(clientNum) {
+      const socket = sockets[clientNum];
+      if (!socket || !socket.connected) {
+        alert('Socket not connected!');
+        return;
+      }
+      socket.emit('markAllAsRead', {}, (res) => {
+        log(clientNum, `markAllAsRead ack: ` + JSON.stringify(res), 'event');
+        setBadgeCount(clientNum, 0);
+        showToast('All Read', 'Marked all notifications as read via Socket');
+      });
+    }
+
+    // Push Notification via Socket
+    function pushNotificationSocket(clientNum) {
+      const socket = sockets[clientNum];
+      if (!socket || !socket.connected) {
+        alert('Socket not connected!');
+        return;
+      }
+      const targetUser = document.getElementById(`c${clientNum}-targetUser`).value.trim();
+      const message = document.getElementById(`c${clientNum}-notifMsg`).value.trim();
+      if (!targetUser || !message) {
+        alert('Enter recipient User ID and message!');
+        return;
+      }
+
+      socket.emit('push notification', {
+        recipient: targetUser,
+        title: 'Instant Socket Notification',
+        message: message,
+        type: 'general'
+      }, (res) => {
+        log(clientNum, `push notification ack: ` + JSON.stringify(res), 'event');
+      });
+    }
+
+    // Simulate Booking Approval via API call
+    async function approveBookingApi(clientNum) {
+      const bookingId = document.getElementById(`c${clientNum}-bookingId`).value.trim();
+      if (!bookingId) {
+        alert('Please enter a Booking ID to approve!');
+        return;
+      }
+
+      const token = socketTokens[2] || socketTokens[1] || '';
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = token.startsWith('Bearer ') ? token : 'Bearer ' + token;
+      }
+
+      log(clientNum, `Calling PATCH /api/v1/booking/${bookingId}/accept ...`, 'booking');
+
+      try {
+        const resp = await fetch(`${socketUrl}/api/v1/booking/${bookingId}/accept`, {
+          method: 'PATCH',
+          headers
+        });
+        const data = await resp.json();
+        log(clientNum, `API Response: ` + JSON.stringify(data), 'booking');
+        if (resp.ok) {
+          showToast('Approved!', 'Booking accepted successfully. Watch Client 1 receive real-time notification!');
+        } else {
+          alert('API Error: ' + (data.message || 'Failed'));
+        }
+      } catch (err) {
+        log(clientNum, `API call error: ${err.message}`, 'default');
+      }
+    }
+
+    // Chat room join
     function joinRoom(clientNum) {
       const socket = sockets[clientNum];
       if (!socket || !socket.connected) {
@@ -263,9 +579,8 @@
         alert('Enter chatId to join');
         return;
       }
-
       socket.emit('joinChat', { chatId }, (res) => {
-        log(clientNum, `joinChat ack: ` + JSON.stringify(res), true);
+        log(clientNum, `joinChat ack: ` + JSON.stringify(res), 'event');
       });
     }
 
@@ -280,14 +595,11 @@
       const text = input.value.trim();
       if (!text) return;
 
-      const payload = { chatId, text };
-
-      socket.emit('message', payload, (res) => {
-        log(clientNum, `message ack: ` + JSON.stringify(res), true);
+      socket.emit('message', { chatId, text }, (res) => {
+        log(clientNum, `message ack: ` + JSON.stringify(res), 'event');
         if (res.status === 200 || res.statusCode === 200) {
           appendMessage(clientNum, text, 'Me', true);
           input.value = '';
-          // Reset typing indicator immediately
           socket.emit('typing', { chatId, isTyping: false });
         } else {
           alert('Failed to send: ' + (res.message || 'Error'));
@@ -295,39 +607,17 @@
       });
     }
 
-    // Real-Time Typing debouncing
     const typingTimeouts = { 1: null, 2: null };
     function handleTyping(clientNum) {
       const socket = sockets[clientNum];
       const chatId = document.getElementById(`c${clientNum}-chatId`).value.trim();
       if (!socket || !socket.connected || !chatId) return;
 
-      // Emit typing true
       socket.emit('typing', { chatId, isTyping: true });
-
-      // Debounce: after 1.5s of no keypress, emit typing false
       clearTimeout(typingTimeouts[clientNum]);
       typingTimeouts[clientNum] = setTimeout(() => {
         socket.emit('typing', { chatId, isTyping: false });
       }, 1500);
-    }
-
-    // Real-Time Mark As Read
-    function markAsRead(clientNum) {
-      const socket = sockets[clientNum];
-      if (!socket || !socket.connected) {
-        alert('Socket not connected!');
-        return;
-      }
-      const chatId = document.getElementById(`c${clientNum}-chatId`).value.trim();
-      if (!chatId) {
-        alert('Enter chatId to mark as read');
-        return;
-      }
-
-      socket.emit('markAsRead', { chatId }, (res) => {
-        log(clientNum, `markAsRead ack: ` + JSON.stringify(res), true);
-      });
     }
 
     function appendMessage(clientNum, text, senderName, isMe) {
@@ -339,7 +629,7 @@
         <div>${text}</div>
         <div class="msg-meta">
           <span>${senderName} • ${time}</span>
-          ${isMe ? '<span class="msg-status">✓ Sent</span>' : ''}
+          ${isMe ? '<span style="color:#38bdf8; font-weight:bold;">✓ Sent</span>' : ''}
         </div>
       `;
       box.appendChild(div);

@@ -564,15 +564,72 @@ const getUserHomeFeedService = async (userId, queryParams = {}) => {
  *    - canWithdraw: true
  */
 /**
+ * Helpers for Instructor Home Feed formatting (Figma 40012288:1871)
+ */
+const formatBookingDateTime = (dateInput, startTime, endTime) => {
+  let timePart = '';
+  if (startTime && endTime) {
+    timePart = `${startTime}–${endTime}`;
+  } else if (startTime) {
+    timePart = startTime;
+  }
+
+  if (!dateInput) return timePart;
+
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return timePart;
+
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const dayIndex = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 ? d.getUTCDay() : d.getDay();
+  const monthIndex = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 ? d.getUTCMonth() : d.getMonth();
+  const dayNum = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 ? d.getUTCDate() : d.getDate();
+
+  const datePart = `${days[dayIndex]}, ${months[monthIndex]} ${dayNum}`;
+  return timePart ? `${datePart} · ${timePart}` : datePart;
+};
+
+const formatExpiresIn = (expiresAt) => {
+  if (!expiresAt) return '';
+  const exp = new Date(expiresAt);
+  if (isNaN(exp.getTime())) return '';
+  const now = new Date();
+  const diffMs = exp.getTime() - now.getTime();
+  if (diffMs <= 0) return 'Expired';
+  const totalMinutes = Math.floor(diffMs / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0 && minutes > 0) return `Expires in ${hours}h ${minutes}m`;
+  if (hours > 0) return `Expires in ${hours}h`;
+  return `Expires in ${minutes}m`;
+};
+
+const splitTimeAndPeriod = (timeStr) => {
+  if (!timeStr || typeof timeStr !== 'string') {
+    return { time: '', period: '' };
+  }
+  const match = timeStr.trim().match(/^(\d{1,2}:\d{2})\s*(AM|PM)?$/i);
+  if (match) {
+    let t = match[1];
+    if (t.length === 4) t = `0${t}`;
+    return {
+      time: t,
+      period: match[2] ? match[2].toUpperCase() : ''
+    };
+  }
+  return { time: timeStr, period: '' };
+};
+
+/**
  * Helper to compute time reminder (e.g. "In 1h", "In 45m", "In progress", "Completed")
  */
 function getLessonTimeReminder(startTime, endTime, status) {
-  if (status === 'completed') return { timeReminder: 'Completed', timeReminderFull: 'Completed' };
-  if (status === 'active') return { timeReminder: 'In progress', timeReminderFull: 'Lesson in progress' };
+  if (status === 'completed') return { timeReminder: 'Completed', startsIn: 'Completed' };
+  if (status === 'active') return { timeReminder: 'In progress', startsIn: 'In progress' };
 
-  if (!startTime) return { timeReminder: '', timeReminderFull: '' };
+  if (!startTime) return { timeReminder: '', startsIn: '' };
   const match = startTime.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-  if (!match) return { timeReminder: '', timeReminderFull: '' };
+  if (!match) return { timeReminder: '', startsIn: '' };
 
   let hours = parseInt(match[1], 10);
   const minutes = parseInt(match[2], 10);
@@ -587,19 +644,13 @@ function getLessonTimeReminder(startTime, endTime, status) {
   const diffMs = startDt.getTime() - now.getTime();
   const diffMinutes = Math.round(diffMs / 60000);
 
-  if (diffMinutes >= 60) {
-    const h = Math.floor(diffMinutes / 60);
-    const m = diffMinutes % 60;
-    const timeReminder = m > 0 ? `In ${h}h ${m}m` : `In ${h}h`;
-    const timeReminderFull = m > 0
-      ? `In ${h} hour${h > 1 ? 's' : ''} ${m} min${m > 1 ? 's' : ''}`
-      : `In ${h} hour${h > 1 ? 's' : ''}`;
-    return { timeReminder, timeReminderFull };
+  if (diffMinutes >= 55) {
+    const h = Math.max(1, Math.round(diffMinutes / 60));
+    const timeReminder = `In ${h}h`;
+    return { timeReminder, startsIn: timeReminder };
   } else if (diffMinutes > 0) {
-    return {
-      timeReminder: `In ${diffMinutes}m`,
-      timeReminderFull: `In ${diffMinutes} minute${diffMinutes > 1 ? 's' : ''}`
-    };
+    const timeReminder = `In ${diffMinutes}m`;
+    return { timeReminder, startsIn: timeReminder };
   } else {
     if (endTime) {
       const endMatch = endTime.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
@@ -612,16 +663,18 @@ function getLessonTimeReminder(startTime, endTime, status) {
 
         const endDt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), endH, endM, 0, 0);
         if (now <= endDt) {
-          return { timeReminder: 'In progress', timeReminderFull: 'Lesson in progress' };
+          return { timeReminder: 'In progress', startsIn: 'In progress' };
         }
       }
     }
     const pastMinutes = Math.abs(diffMinutes);
     if (pastMinutes < 60) {
-      return { timeReminder: `${pastMinutes}m ago`, timeReminderFull: `${pastMinutes} minutes ago` };
+      const timeReminder = `${pastMinutes}m ago`;
+      return { timeReminder, startsIn: timeReminder };
     }
     const pastHours = Math.floor(pastMinutes / 60);
-    return { timeReminder: `${pastHours}h ago`, timeReminderFull: `${pastHours} hours ago` };
+    const timeReminder = `${pastHours}h ago`;
+    return { timeReminder, startsIn: timeReminder };
   }
 }
 
@@ -633,35 +686,39 @@ const getInstructorHomeFeedService = async (instructorId, queryParams = {}) => {
   let instructorDoc = null;
 
   if (instructorId && mongoose.Types.ObjectId.isValid(instructorId)) {
-    instructorDoc = await userModel.findById(instructorId).select('avgRating totalReviews ratingCount');
+    instructorDoc = await userModel.findById(instructorId).select('fullName image address location avgRating totalReviews ratingCount totalEarnings role');
     if (instructorDoc) {
       targetInstructorId = instructorDoc._id;
     }
   }
 
+  // Fallback: If no valid instructorId passed or not found by ID, look for the first registered instructor (for unauthenticated dev testing)
   if (!targetInstructorId) {
-    instructorDoc = await userModel.findOne({ role: 'instructor' }).select('avgRating totalReviews ratingCount');
+    instructorDoc = await userModel.findOne({ role: 'instructor' }).select('fullName image address location avgRating totalReviews ratingCount totalEarnings role');
     if (instructorDoc) {
       targetInstructorId = instructorDoc._id;
     }
   }
 
-  if (!targetInstructorId) {
+  // If no instructor exists in the database
+  if (!targetInstructorId || !instructorDoc) {
     return {
+      instructor: null,
+      greeting: 'Morning',
+      unreadNotificationCount: 0,
       overview: {
-        todayCount: 0,
         upcomingCount: 0,
         completedCount: 0,
-        newRequestCount: 0,
         earnedAllTime: 0,
         rating: 0,
         totalReviews: 0
       },
-      todayCount: 0,
-      todayLessonText: '0 Lessons',
-      newRequestCount: 0,
       newRequests: [],
-      today: []
+      today: [],
+      earnings: {
+        available: 0,
+        pending: 0
+      }
     };
   }
 
@@ -674,11 +731,10 @@ const getInstructorHomeFeedService = async (instructorId, queryParams = {}) => {
   const startOfToday = localStartOfToday < utcStartOfToday ? localStartOfToday : utcStartOfToday;
   const endOfToday = localEndOfToday > utcEndOfToday ? localEndOfToday : utcEndOfToday;
 
+  // 1. Fetch live booking counts, booking requests, and reviews from real data
   const [
     upcomingCount,
     completedCount,
-    newRequestCount,
-    realCompletedEarnings,
     realRequests,
     realToday,
     reviewStats
@@ -691,27 +747,17 @@ const getInstructorHomeFeedService = async (instructorId, queryParams = {}) => {
       instructor: targetInstructorId,
       status: 'completed'
     }),
-    Booking.countDocuments({
-      instructor: targetInstructorId,
-      status: 'pending'
-    }),
-    Booking.aggregate([
-      { $match: { instructor: new mongoose.Types.ObjectId(targetInstructorId), status: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$pricing.instructorEarnings' } } }
-    ]),
     Booking.find({
       instructor: targetInstructorId,
       status: 'pending'
     })
       .populate('client', 'fullName image')
-      .select('_id bookingId client swimmer lessonType date startTime endTime location pricing expiresAt')
       .sort({ createdAt: -1 }),
     Booking.find({
       instructor: targetInstructorId,
       date: { $gte: startOfToday, $lte: endOfToday },
-      status: { $in: ['pending', 'accepted', 'active'] }
+      status: { $in: ['accepted', 'active', 'completed'] }
     })
-      .select('_id bookingId swimmer lessonType date startTime endTime location status pricing')
       .sort({ startTime: 1 }),
     Review.aggregate([
       { $match: { reviewee: new mongoose.Types.ObjectId(targetInstructorId) } },
@@ -725,65 +771,51 @@ const getInstructorHomeFeedService = async (instructorId, queryParams = {}) => {
     ])
   ]);
 
-  const earnedAllTime = realCompletedEarnings.length > 0 ? Number(realCompletedEarnings[0].total || 0) : 0;
+  // 2. Fetch real earnings breakdown using the system's earnings service
+  let totalEarned = 0;
+  let availableAmount = 0;
+  let pendingAmount = 0;
+
+  try {
+    const { getInstructorEarningsOverviewService } = require('../Earnings/earnings.service');
+    const earningsOverview = await getInstructorEarningsOverviewService(targetInstructorId);
+    if (earningsOverview) {
+      totalEarned = Number(earningsOverview.totalEarned || 0);
+      availableAmount = Number(earningsOverview.availableToWithdraw || 0);
+      pendingAmount = Number(earningsOverview.pending || 0);
+    }
+  } catch (earnErr) {
+    const realCompletedEarnings = await Booking.aggregate([
+      { $match: { instructor: new mongoose.Types.ObjectId(targetInstructorId), status: 'completed' } },
+      { $group: { _id: null, total: { $sum: '$pricing.instructorEarnings' } } }
+    ]);
+    totalEarned = realCompletedEarnings.length > 0 ? Number(realCompletedEarnings[0].total || 0) : Number(instructorDoc.totalEarnings || 0);
+    availableAmount = totalEarned;
+    pendingAmount = 0;
+  }
+
+  // 3. Compute Rating & Review Counts
   let rating = Number(instructorDoc?.avgRating || 0);
   let totalReviews = Number(instructorDoc?.totalReviews || instructorDoc?.ratingCount || 0);
-
   if (reviewStats && reviewStats.length > 0) {
     rating = Number(reviewStats[0].avgRating.toFixed(1));
     totalReviews = Number(reviewStats[0].totalReviews);
   }
 
-  const newRequests = realRequests.map((r) => ({
-    _id: r._id,
-    bookingId: r.bookingId,
-    client: {
-      _id: r.client?._id,
-      fullName: r.client?.fullName || '',
-      image: r.client?.image || ''
-    },
-    swimmer: {
-      name: r.swimmer?.name || '',
-      age: r.swimmer?.age || 0
-    },
-    lessonType: r.lessonType || '',
-    price: Number(r.pricing?.instructorEarnings ?? r.pricing?.totalAmount ?? 0),
-    date: r.date,
-    startTime: r.startTime || '',
-    endTime: r.endTime || '',
-    location: r.location?.poolName || r.location?.address || '',
-    expiresAt: r.expiresAt || null
-  }));
+  // 4. Header Greeting & Location (Figma 40012288:2006 & 40012288:2011)
+  const currentHour = now.getHours();
+  let greetingPrefix = 'Morning';
+  if (currentHour >= 12 && currentHour < 17) {
+    greetingPrefix = 'Afternoon';
+  } else if (currentHour >= 17) {
+    greetingPrefix = 'Evening';
+  }
 
-  const today = realToday.map((l) => {
-    const { timeReminder, timeReminderFull } = getLessonTimeReminder(l.startTime, l.endTime, l.status);
-    const swimmerName = l.swimmer?.name || 'Swimmer';
-    const swimmerAge = l.swimmer?.age ? `swimmer age ${l.swimmer.age}` : '';
-    const lessonTitle = swimmerAge ? `Private lesson · ${swimmerAge}` : `Private lesson for ${swimmerName}`;
+  const fullName = instructorDoc.fullName ? instructorDoc.fullName.trim() : '';
+  const firstName = fullName ? fullName.split(' ')[0] : '';
+  const greeting = firstName ? `${greetingPrefix}, ${firstName}` : greetingPrefix;
 
-    return {
-      _id: l._id,
-      bookingId: l.bookingId || '',
-      startTime: l.startTime || '',
-      endTime: l.endTime || '',
-      time: l.startTime ? (l.endTime ? `${l.startTime} – ${l.endTime}` : l.startTime) : '',
-      timeReminder,
-      timeReminderFull,
-      lessonType: l.lessonType || '60-min private lesson',
-      lessonTitle,
-      swimmer: {
-        name: l.swimmer?.name || '',
-        age: l.swimmer?.age || 0
-      },
-      location: l.location?.poolName || l.location?.address || '',
-      status: l.status || 'pending',
-      price: Number(l.pricing?.instructorEarnings ?? l.pricing?.totalAmount ?? 0)
-    };
-  });
-
-  const todayCount = today.length;
-  const todayLessonText = todayCount === 1 ? '1 Lesson' : `${todayCount} Lessons`;
-
+  // 5. Unread Notifications Count (Figma 40012288:1999)
   let unreadNotificationCount = 0;
   try {
     const Notification = require('../Notification/notification.model');
@@ -795,23 +827,87 @@ const getInstructorHomeFeedService = async (instructorId, queryParams = {}) => {
     unreadNotificationCount = 0;
   }
 
+  // 6. Map New Requests (Figma 40012309:7207)
+  const newRequests = realRequests.map((r) => {
+    const price = Number(r.pricing?.instructorEarnings ?? r.pricing?.totalAmount ?? 0);
+    const lessonType = r.swimmer?.age
+      ? `${r.lessonType || 'Private lesson'} · swimmer age ${r.swimmer.age}`
+      : (r.lessonType || 'Private lesson');
+
+    return {
+      _id: r._id,
+      bookingId: r.bookingId || '',
+      client: {
+        fullName: r.client?.fullName || '',
+        image: r.client?.image || ''
+      },
+      lessonType,
+      price,
+      dateTime: formatBookingDateTime(r.date, r.startTime, r.endTime),
+      location: r.location?.poolName || r.location?.address || '',
+      expiresIn: formatExpiresIn(r.expiresAt)
+    };
+  });
+
+  // 7. Sort Today's Lessons Chronologically and Map (Figma 40012309:7205)
+  realToday.sort((a, b) => {
+    const parseTimeToMins = (t) => {
+      if (!t) return 0;
+      const m = t.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+      if (!m) return 0;
+      let h = parseInt(m[1], 10);
+      const min = parseInt(m[2], 10);
+      const mer = m[3] ? m[3].toUpperCase() : null;
+      if (mer === 'PM' && h < 12) h += 12;
+      else if (mer === 'AM' && h === 12) h = 0;
+      return h * 60 + min;
+    };
+    return parseTimeToMins(a.startTime) - parseTimeToMins(b.startTime);
+  });
+
+  const today = realToday.map((l) => {
+    const { startsIn, timeReminder } = getLessonTimeReminder(l.startTime, l.endTime, l.status);
+    const swimmerAge = l.swimmer?.age ? `age ${l.swimmer.age}` : '';
+    const title = swimmerAge
+      ? `${l.lessonType || 'Private lesson'} · ${swimmerAge}`
+      : (l.lessonType || 'Private lesson');
+
+    const { time: timeOnly, period } = splitTimeAndPeriod(l.startTime);
+    const reminder = startsIn || timeReminder || '';
+
+    return {
+      _id: l._id,
+      time: timeOnly,
+      period,
+      title,
+      location: l.location?.poolName || l.location?.address || '',
+      startsIn: reminder,
+      statusBadge: reminder
+    };
+  });
+
   return {
+    instructor: {
+      _id: instructorDoc._id,
+      fullName: instructorDoc.fullName || '',
+      image: instructorDoc.image || '',
+      address: instructorDoc.address || ''
+    },
+    greeting,
     unreadNotificationCount,
     overview: {
-      todayCount,
       upcomingCount,
       completedCount,
-      newRequestCount,
-      earnedAllTime,
+      earnedAllTime: totalEarned,
       rating,
-      totalReviews,
-      unreadNotificationCount
+      totalReviews
     },
-    todayCount,
-    todayLessonText,
-    newRequestCount,
     newRequests,
-    today
+    today,
+    earnings: {
+      available: availableAmount,
+      pending: pendingAmount
+    }
   };
 };
 

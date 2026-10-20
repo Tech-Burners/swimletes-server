@@ -24,6 +24,8 @@ const io = socket(socketServer, {
 });
 
 
+global.io = io;
+
 let server = null;
 let secondaryServer = null;
 const port = Number(process.env.BACKEND_PORT) || 8049;
@@ -55,6 +57,14 @@ async function myServer() {
       }
     }
 
+    // Attach Socket.io to Express HTTP servers so clients connecting to port 8049 / 8047 / 3049 all succeed seamlessly
+    try {
+      if (server) io.attach(server);
+      if (secondaryServer) io.attach(secondaryServer);
+    } catch (attachErr) {
+      console.warn("Socket.io attach to express server warning:", attachErr.message);
+    }
+
     //start socket server
     socketServer.listen(socketPort, () => {
       console.dir(
@@ -64,7 +74,6 @@ async function myServer() {
 
     // Set up Socket.io event handlers
     socketIO(io);
-    global.io = io;
 
   } catch (error) {
     console.error("💀 Server start error:", error);

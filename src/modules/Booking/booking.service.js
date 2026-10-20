@@ -1655,7 +1655,9 @@ const getBookingByIdService = async (bookingId, userId, requestedRole, queryPara
     lessonsBooked: 0,
     cancels: 0,
     memberSince: '',
-    memberText: 'New Member'
+    memberDays: 0,
+    daysJoined: 0,
+    memberText: '0 days'
   };
 
   if (clientUser && clientUser._id) {
@@ -1667,11 +1669,17 @@ const getBookingByIdService = async (bookingId, userId, requestedRole, queryPara
       clientStats.lessonsBooked = bookedCount || 0;
       clientStats.cancels = cancelCount || 0;
 
-      if (clientUser.createdAt) {
-        const createdDate = new Date(clientUser.createdAt);
+      const createdDate = clientUser.createdAt
+        ? new Date(clientUser.createdAt)
+        : (clientUser._id && typeof clientUser._id.getTimestamp === 'function' ? clientUser._id.getTimestamp() : null);
+
+      if (createdDate && !isNaN(createdDate.getTime())) {
         clientStats.memberSince = createdDate.getFullYear().toString();
-        const diffYears = Math.floor((Date.now() - createdDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
-        clientStats.memberText = diffYears >= 1 ? `${diffYears}y Member` : 'New Member';
+        const diffMs = Math.max(0, Date.now() - createdDate.getTime());
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        clientStats.memberDays = diffDays;
+        clientStats.daysJoined = diffDays;
+        clientStats.memberText = diffDays === 1 ? '1 day' : `${diffDays} days`;
       }
     } catch (e) {
       // continue cleanly
@@ -1791,12 +1799,17 @@ const getBookingByIdService = async (bookingId, userId, requestedRole, queryPara
       number: clientUser.number || null,
       rating: clientUser.avgRating ?? 5.0,
       ratingText: `${(clientUser.avgRating || 5.0).toFixed(1)} · rated by ${clientUser.ratingCount || clientUser.totalReviews || 1} instructors`,
+      daysJoined: clientStats.daysJoined,
+      memberDays: clientStats.memberDays,
+      memberText: clientStats.memberText,
       stats: {
         lessonsBooked: clientStats.lessonsBooked,
         lessonsBookedText: `${clientStats.lessonsBooked}`,
         cancels: clientStats.cancels,
         cancelsText: `${clientStats.cancels}`,
         memberSince: clientStats.memberSince,
+        memberDays: clientStats.memberDays,
+        daysJoined: clientStats.daysJoined,
         memberText: clientStats.memberText
       }
     } : null,
@@ -2235,7 +2248,7 @@ const sendBookingReminderService = async (bookingId, instructorId) => {
 /**
  * Instructor Accepts a Booking Request (Figma Node 40012335:5594)
  */
-const acceptBookingService = async (bookingId, instructorId) => {
+const acceptBookingService = async (bookingId, instructorId, userRole = null) => {
   if (!mongoose.Types.ObjectId.isValid(bookingId)) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid Booking ID');
   }
@@ -2245,7 +2258,7 @@ const acceptBookingService = async (bookingId, instructorId) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
   }
 
-  if (booking.instructor.toString() !== instructorId.toString()) {
+  if (userRole !== 'admin' && booking.instructor.toString() !== instructorId.toString()) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Only the assigned instructor can accept this booking');
   }
 
@@ -2298,12 +2311,14 @@ const acceptBookingService = async (bookingId, instructorId) => {
     console.error('Error linking chat to accepted booking:', chatErr);
   }
 
-  // Trigger Booking Confirmed Notification for client (Figma 40012289:5166)
+  // Trigger Booking Confirmed Notification for client and instructor (Figma 40012289:5166)
   try {
     const { createNotificationService } = require('../Notification/notification.service');
     const lessonDateStr = booking.date ? new Date(booking.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
     const formattedDate = lessonDateStr ? `${lessonDateStr} at ${booking.startTime || ''}` : (booking.startTime || '');
     const lessonInfo = `${formattedDate} · ${booking.duration || 45}-min ${booking.lessonType || 'private lesson'}`;
+
+    // 1. Notification for student/client
     await createNotificationService({
       recipient: booking.client,
       sender: booking.instructor,
@@ -2314,11 +2329,100 @@ const acceptBookingService = async (bookingId, instructorId) => {
       iconBg: 'rgba(16, 185, 129, 0.15)',
       data: {
         bookingId: booking._id,
-        bookingReference: booking.bookingId
+        bookingReference: booking.bookingId,
+        date: booking.date,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        duration: booking.duration,
+        lessonType: booking.lessonType,
+        status: 'accepted'
+      }
+    });
+
+    // 2. Notification for instructor
+    await createNotificationService({
+      recipient: booking.instructor,
+      sender: booking.client,
+      title: 'Lesson confirmed',
+      message: lessonInfo,
+      type: 'booking_confirmed',
+      icon: 'calendar-check',
+      iconBg: 'rgba(16, 185, 129, 0.15)',
+      data: {
+        bookingId: booking._id,
+        bookingReference: booking.bookingId,
+        date: booking.date,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        duration: booking.duration,
+        lessonType: booking.lessonType,
+        status: 'accepted'
       }
     });
   } catch (notifErr) {
     console.error('Error creating accept booking notification:', notifErr.message);
+  }
+
+  // Real-time booking socket broadcast to client, instructor, and booking channels
+  try {
+    if (global.io) {
+      const clientStr = booking.client.toString();
+      const instructorStr = booking.instructor.toString();
+      const bookingIdStr = booking._id.toString();
+
+      const bookingAcceptedPayload = {
+        status: 200,
+        bookingId: bookingIdStr,
+        bookingReference: booking.bookingId,
+        bookingStatus: 'accepted',
+        status: 'accepted',
+        displayStatus: 'upcoming',
+        message: 'Your booking has been approved and confirmed!',
+        booking: {
+          _id: booking._id,
+          bookingId: booking.bookingId,
+          status: 'accepted',
+          date: booking.date,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          duration: booking.duration,
+          lessonType: booking.lessonType
+        }
+      };
+
+      // 1. Emit to specific booking channels
+      global.io.emit(`bookingStatusUpdate::${bookingIdStr}`, bookingAcceptedPayload);
+      global.io.to(`booking::${bookingIdStr}`).emit('bookingStatusUpdate', bookingAcceptedPayload);
+
+      // 2. Emit to client
+      global.io.emit(`bookingStatusUpdate::${clientStr}`, bookingAcceptedPayload);
+      global.io.emit(`bookingAccepted::${clientStr}`, bookingAcceptedPayload);
+      global.io
+        .to(`user::${clientStr}`)
+        .to(clientStr)
+        .to(`user_${clientStr}`)
+        .emit('bookingAccepted', bookingAcceptedPayload);
+      global.io
+        .to(`user::${clientStr}`)
+        .to(clientStr)
+        .to(`user_${clientStr}`)
+        .emit('bookingStatusUpdate', bookingAcceptedPayload);
+
+      // 3. Emit to instructor
+      global.io.emit(`bookingStatusUpdate::${instructorStr}`, bookingAcceptedPayload);
+      global.io
+        .to(`user::${instructorStr}`)
+        .to(instructorStr)
+        .to(`user_${instructorStr}`)
+        .emit('bookingAccepted', bookingAcceptedPayload);
+      global.io
+        .to(`user::${instructorStr}`)
+        .to(instructorStr)
+        .to(`user_${instructorStr}`)
+        .emit('bookingStatusUpdate', bookingAcceptedPayload);
+    }
+  } catch (socketErr) {
+    console.error('Error emitting booking accepted socket event:', socketErr.message);
   }
 
   const populated = await Booking.findById(booking._id)
@@ -2840,19 +2944,20 @@ const rebookLessonService = async (bookingId, userId) => {
  * Generic Status Update service
  */
 const updateBookingStatusService = async (bookingId, userId, userRole, status, payload = {}) => {
-  if (status === 'accepted') {
-    return acceptBookingService(bookingId, userId);
+  const normalizedStatus = String(status || '').trim().toLowerCase();
+  if (normalizedStatus === 'accepted' || normalizedStatus === 'approved') {
+    return acceptBookingService(bookingId, userId, userRole);
   }
-  if (status === 'declined') {
+  if (normalizedStatus === 'declined' || normalizedStatus === 'rejected') {
     return declineBookingService(bookingId, userId, payload.reason);
   }
-  if (status === 'completed') {
+  if (normalizedStatus === 'completed') {
     return completeBookingService(bookingId, userId, userRole);
   }
-  if (status === 'active') {
+  if (normalizedStatus === 'active') {
     return markBookingActiveService(bookingId, userId, userRole);
   }
-  if (status === 'cancelled') {
+  if (normalizedStatus === 'cancelled') {
     return cancelBookingService(bookingId, userId, userRole, payload.reason);
   }
 
@@ -3260,20 +3365,29 @@ const adminUpdateBookingStatusService = async (bookingId, payload = {}) => {
 
   const { status, paymentStatus, reason } = payload;
   const updateData = {};
+  const normalizedStatus = status ? String(status).trim().toLowerCase() : null;
 
-  if (status) {
-    updateData.status = status;
-    if (status === 'completed') {  
+  if (normalizedStatus) {
+    if (normalizedStatus === 'accepted' || normalizedStatus === 'approved') {
+      updateData.status = 'accepted';
+    } else if (normalizedStatus === 'declined' || normalizedStatus === 'rejected') {
+      updateData.status = 'declined';
+      updateData.declinedAt = new Date();
+      if (reason) updateData.declinedReason = reason;
+    } else if (normalizedStatus === 'completed') {  
+      updateData.status = 'completed';
       updateData.completedAt = new Date();
       updateData.clientCompleted = true;
       updateData.instructorCompleted = true;
       updateData.clientCompletedAt = new Date();
       updateData.instructorCompletedAt = new Date();
-    }
-    if (status === 'cancelled') {
+    } else if (normalizedStatus === 'cancelled') {
+      updateData.status = 'cancelled';
       updateData.cancelledBy = 'admin';
       updateData.cancelledAt = new Date();
       if (reason) updateData.cancellationReason = reason;
+    } else {
+      updateData.status = normalizedStatus;
     }
   }
 
@@ -3287,6 +3401,122 @@ const adminUpdateBookingStatusService = async (bookingId, payload = {}) => {
 
   if (!updatedBooking) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
+  }
+
+  // Handle notifications and real-time socket events for status changes
+  if (normalizedStatus === 'accepted' || normalizedStatus === 'approved') {
+    // Auto-link chat
+    try {
+      const Chat = require('../Chat/chat.model');
+      let chat = await Chat.findOne({
+        participants: { $all: [updatedBooking.client._id, updatedBooking.instructor._id] }
+      });
+      if (chat) {
+        chat.booking = updatedBooking._id;
+        await chat.save();
+      } else {
+        chat = await Chat.create({
+          participants: [updatedBooking.client._id, updatedBooking.instructor._id],
+          booking: updatedBooking._id,
+          unreadCounts: {
+            [updatedBooking.client._id.toString()]: 0,
+            [updatedBooking.instructor._id.toString()]: 0
+          }
+        });
+      }
+      if (chat && (!updatedBooking.chat || updatedBooking.chat.toString() !== chat._id.toString())) {
+        updatedBooking.chat = chat._id;
+        await updatedBooking.save();
+      }
+    } catch (chatErr) {
+      console.error('Error linking chat on admin booking approval:', chatErr);
+    }
+
+    // Trigger Notification for client
+    try {
+      const { createNotificationService } = require('../Notification/notification.service');
+      const lessonDateStr = updatedBooking.date ? new Date(updatedBooking.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+      const formattedDate = lessonDateStr ? `${lessonDateStr} at ${updatedBooking.startTime || ''}` : (updatedBooking.startTime || '');
+      const lessonInfo = `${formattedDate} · ${updatedBooking.duration || 45}-min ${updatedBooking.lessonType || 'private lesson'}`;
+
+      await createNotificationService({
+        recipient: updatedBooking.client._id,
+        sender: updatedBooking.instructor._id,
+        title: 'Booking confirmed',
+        message: lessonInfo,
+        type: 'booking_confirmed',
+        icon: 'calendar-check',
+        iconBg: 'rgba(16, 185, 129, 0.15)',
+        data: {
+          bookingId: updatedBooking._id,
+          bookingReference: updatedBooking.bookingId,
+          date: updatedBooking.date,
+          startTime: updatedBooking.startTime,
+          endTime: updatedBooking.endTime,
+          duration: updatedBooking.duration,
+          lessonType: updatedBooking.lessonType,
+          status: 'accepted'
+        }
+      });
+    } catch (notifErr) {
+      console.error('Error creating admin approval notification:', notifErr.message);
+    }
+
+    // Real-time booking socket broadcast
+    try {
+      if (global.io) {
+        const clientStr = updatedBooking.client._id.toString();
+        const instructorStr = updatedBooking.instructor._id.toString();
+        const bookingIdStr = updatedBooking._id.toString();
+
+        const bookingAcceptedPayload = {
+          status: 200,
+          bookingId: bookingIdStr,
+          bookingReference: updatedBooking.bookingId,
+          bookingStatus: 'accepted',
+          status: 'accepted',
+          displayStatus: 'upcoming',
+          message: 'Your booking has been approved and confirmed!',
+          booking: {
+            _id: updatedBooking._id,
+            bookingId: updatedBooking.bookingId,
+            status: 'accepted',
+            date: updatedBooking.date,
+            startTime: updatedBooking.startTime,
+            endTime: updatedBooking.endTime
+          }
+        };
+
+        global.io.emit(`bookingStatus::${bookingIdStr}`, bookingAcceptedPayload);
+        global.io.emit(`bookingStatusUpdate::${bookingIdStr}`, bookingAcceptedPayload);
+        global.io.emit(`bookingStatusUpdate::${clientStr}`, bookingAcceptedPayload);
+        global.io.emit(`bookingAccepted::${clientStr}`, bookingAcceptedPayload);
+
+        global.io
+          .to(`user::${clientStr}`)
+          .to(clientStr)
+          .to(`user_${clientStr}`)
+          .emit('bookingAccepted', bookingAcceptedPayload);
+        global.io
+          .to(`user::${clientStr}`)
+          .to(clientStr)
+          .to(`user_${clientStr}`)
+          .emit('bookingStatusUpdate', bookingAcceptedPayload);
+
+        global.io
+          .to(`user::${instructorStr}`)
+          .to(instructorStr)
+          .to(`user_${instructorStr}`)
+          .emit('bookingAccepted', bookingAcceptedPayload);
+        global.io
+          .to(`user::${instructorStr}`)
+          .to(instructorStr)
+          .to(`user_${instructorStr}`)
+          .emit('bookingStatusUpdate', bookingAcceptedPayload);
+      }
+    } catch (socketErr) {
+      console.error('Error emitting socket on admin booking approval:', socketErr.message);
+    }
   }
 
   return getAdminBookingDetailsService(updatedBooking._id);
