@@ -170,10 +170,43 @@ const createReportService = async (userId, userRole, data = {}, files = []) => {
     status: 'open'
   });
 
-  // Flag booking status as disputed
-  await Booking.findByIdAndUpdate(booking._id, {
-    status: 'disputed'
-  });
+  // Simple request to admin: do NOT place a financial hold or overwrite booking.status to 'disputed'.
+  // Booking lifecycle, chat, payouts, and earnings proceed as usual.
+
+  // Notify Admins in real-time about the new report request
+  try {
+    const { createNotificationService } = require('../Notification/notification.service');
+    const admins = await User.find({ role: 'admin' }).select('_id');
+    const reporterUser = await User.findById(effectiveUserId).select('fullName');
+    const reporterName = reporterUser?.fullName || (isInstructor ? 'Instructor' : 'Client');
+
+    for (const admin of admins) {
+      await createNotificationService({
+        recipient: admin._id,
+        sender: effectiveUserId,
+        title: 'New Issue / Dispute Reported',
+        message: `${reporterName} reported an issue for booking ${generatedBookingId}: "${reason.trim()}"`,
+        type: 'system',
+        data: {
+          reportId: report._id,
+          bookingId: generatedBookingId,
+          reason: reason.trim()
+        }
+      });
+    }
+
+    if (global.io) {
+      global.io.emit('newDisputeReport', {
+        reportId: report._id,
+        bookingId: generatedBookingId,
+        reporter: effectiveUserId,
+        reason: reason.trim(),
+        createdAt: report.createdAt
+      });
+    }
+  } catch (notifErr) {
+    console.error('Error notifying admin of report request:', notifErr.message);
+  }
 
   return {
     reportId: report._id,
@@ -433,11 +466,19 @@ const adminResolveDisputeService = async (disputeId, adminId, body = {}) => {
 
   await dispute.save();
 
-  // If dispute is dismissed or resolved, restore the booking status back from 'disputed' to 'completed' or original status
+  // Only update booking status if admin explicitly resolves with a refund (sets to cancelled)
+  // or restores an older legacy booking that had status 'disputed'
   if (dispute.booking) {
-    await Booking.findByIdAndUpdate(dispute.booking, {
-      status: resolvedAction === 'refunded' ? 'cancelled' : 'completed'
-    });
+    if (resolvedAction === 'refunded') {
+      await Booking.findByIdAndUpdate(dispute.booking, {
+        status: 'cancelled'
+      });
+    } else {
+      const currentBooking = await Booking.findById(dispute.booking).select('status');
+      if (currentBooking?.status === 'disputed') {
+        await Booking.findByIdAndUpdate(dispute.booking, { status: 'completed' });
+      }
+    }
   }
 
   return getAdminDisputeDetailsService(dispute._id);
